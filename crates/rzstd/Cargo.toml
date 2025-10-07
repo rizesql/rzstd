@@ -1,0 +1,11 @@
+[package]
+name = "rzstd"
+edition = "2024"
+description = ""
+readme = "./README.md"
+
+rust-version = { workspace = true }
+version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
