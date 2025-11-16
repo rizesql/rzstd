@@ -1,0 +1,2 @@
+run:
+  latexmk -pvc main.tex
