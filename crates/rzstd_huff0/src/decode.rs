@@ -81,8 +81,7 @@ impl<const N: usize> DecodingTable<N> {
 
         for &w in &weights[..weights_count] {
             if w > MAX_BITS {
-                println!("{w} exceeds {MAX_BITS}");
-                return Err(Error::Corruption);
+                return Err(Error::WeightTooLarge(w, MAX_BITS));
             }
         }
 
@@ -102,10 +101,9 @@ impl<const N: usize> DecodingTable<N> {
             sum += 1 << (w - 1);
             max_w = max_w.max(w);
         }
-        dbg!(sum);
 
         if sum == 0 {
-            return Err(Error::Corruption);
+            return Err(Error::ZeroWeightSum);
         }
 
         let table_log = if sum <= 1 {
@@ -116,15 +114,14 @@ impl<const N: usize> DecodingTable<N> {
         .max(max_w);
 
         if table_log > MAX_BITS {
-            return Err(Error::Corruption);
+            return Err(Error::TableLogTooLarge(table_log, MAX_BITS));
         }
 
         let target = 1 << table_log;
         let remainder = target - sum;
 
-        dbg!(remainder);
         if remainder == 0 || !remainder.is_power_of_two() {
-            return Err(Error::Corruption);
+            return Err(Error::InvalidInferredWeight(remainder));
         }
 
         let inferred_weight = (remainder.trailing_zeros() as u8) + 1;
@@ -182,7 +179,7 @@ impl<const N: usize> DecodingTable<N> {
                 .take(count)
             {
                 if target.n_bits != 0 {
-                    return Err(Error::Corruption);
+                    return Err(Error::EntryOverwrite(idx));
                 }
                 *target = Entry {
                     symbol: sym as u8,
@@ -200,10 +197,12 @@ impl<const N: usize> DecodingTable<N> {
     fn read_weights(src: &[u8], out: &mut [u8; 256]) -> Result<(usize, usize), Error> {
         let header = *src
             .first()
-            .ok_or(Error::IO(rzstd_io::Error::NotEnoughBits))?;
+            .ok_or(Error::IO(rzstd_io::Error::NotEnoughBits {
+                requested: 8,
+                remaining: 0,
+            }))?;
         let src = &src[1..];
 
-        dbg!(header);
         if header >= 128 {
             let count = header - 127;
             let consumed = Self::read_weights_direct(src, out, count)?;
@@ -272,7 +271,10 @@ impl<const N: usize> DecodingTable<N> {
     ) -> Result<usize, Error> {
         let count = count as usize;
         if src.len() < count {
-            return Err(Error::IO(rzstd_io::Error::NotEnoughBits));
+            return Err(Error::IO(rzstd_io::Error::NotEnoughBits {
+                requested: count * 8,
+                remaining: src.len() * 8,
+            }));
         }
 
         let buf = &src[..count];

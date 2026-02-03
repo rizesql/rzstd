@@ -13,5 +13,6 @@ description.workspace = true
 doctest = true
 
 [dependencies]
-miette.workspace = true
 rzstd_decompress.workspace = true
+
+miette = { workspace = true, features = ["fancy"] }

@@ -5,7 +5,6 @@ pub const HEADER_SIZE: usize = 3;
 impl<R: rzstd_io::Reader> Context<'_, R> {
     pub fn block(&mut self) -> Result<bool, Error> {
         let header = Header::read(&mut self.src)?;
-        dbg!(header.block_type());
         match header.block_type() {
             Type::Raw => {
                 let count = header.decompressed_size().ok_or(Error::MissingBlockSize)?;

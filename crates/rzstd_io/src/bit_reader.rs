@@ -33,12 +33,14 @@ impl<'src> BitReader<'src> {
             self.refill();
 
             if self.bit_count < n_bits {
-                return Err(Error::NotEnoughBits);
+                return Err(Error::NotEnoughBits {
+                    requested: n_bits as usize,
+                    remaining: self.bit_count as usize + self.src.len() * 8,
+                });
             }
         }
 
         let ret = self.peek(n_bits);
-        println!("{:#x}", ret);
         self.buf >>= n_bits;
         self.bit_count -= n_bits;
         Ok(ret)

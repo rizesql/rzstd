@@ -43,7 +43,10 @@ impl<'src> ReverseBitReader<'src> {
         if self.bit_count < n_bits {
             self.refill();
             if self.bit_count < n_bits {
-                return Err(Error::NotEnoughBits);
+                return Err(Error::NotEnoughBits {
+                    requested: n_bits as usize,
+                    remaining: self.bits_remaining(),
+                });
             }
         }
         Ok(())
@@ -161,7 +164,7 @@ mod tests {
         assert_eq!(br.read(1)?, 1, "Bit 2 should be 1");
         assert_eq!(br.read(1)?, 1, "Bit 3 should be 1");
 
-        assert!(matches!(br.read(1), Err(Error::NotEnoughBits)));
+        assert!(matches!(br.read(1), Err(Error::NotEnoughBits { .. })));
 
         Ok(())
     }
@@ -197,7 +200,7 @@ mod tests {
         assert_eq!(br.read(1)?, 1);
         assert_eq!(br.read(1)?, 0);
 
-        assert!(matches!(br.read(1), Err(Error::NotEnoughBits)));
+        assert!(matches!(br.read(1), Err(Error::NotEnoughBits { .. })));
         Ok(())
     }
 
@@ -214,7 +217,10 @@ mod tests {
         ));
 
         let mut br = ReverseBitReader::new(&[0x01])?;
-        assert!(matches!(br.read(1).err(), Some(Error::NotEnoughBits)));
+        assert!(matches!(
+            br.read(1).err(),
+            Some(Error::NotEnoughBits { .. })
+        ));
 
         Ok(())
     }

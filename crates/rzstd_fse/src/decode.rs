@@ -70,11 +70,11 @@ impl<const N: usize> NormalizedDistribution<N> {
         let read_log = 5 + src.read(4)? as u8;
 
         if !ACCURACY_LOG_RANGE.contains(&read_log) {
-            return Err(Error::InvalidAccuracyLog);
+            return Err(Error::InvalidAccuracyLog(read_log));
         }
 
         if read_log > max_accuracy_log {
-            return Err(Error::AccuracyLogMismatch);
+            return Err(Error::AccuracyLogMismatch(max_accuracy_log, read_log));
         }
 
         let mut final_counts = [0i16; MAX_SYMBOLS];
@@ -132,7 +132,7 @@ impl<const N: usize> NormalizedDistribution<N> {
         }
 
         if remaining != 0 {
-            return Err(Error::SumMismatch);
+            return Err(Error::SumMismatch(remaining));
         }
 
         Ok(NormalizedDistribution {
@@ -225,7 +225,7 @@ impl<const N: usize> DecodingTable<N> {
         let accuracy_log = N.trailing_zeros() as u8;
 
         if !ACCURACY_LOG_RANGE.contains(&accuracy_log) {
-            return Err(Error::InvalidAccuracyLog);
+            return Err(Error::InvalidAccuracyLog(accuracy_log));
         }
 
         let mut table = [Entry {
@@ -284,7 +284,7 @@ impl<const N: usize> DecodingTable<N> {
         }
 
         if pos != 0 {
-            return Err(Error::FastSpreadAlignmentError);
+            return Err(Error::FastSpreadAlignmentError(pos));
         }
 
         Ok(())
@@ -335,7 +335,7 @@ impl<const N: usize> DecodingTable<N> {
         }
 
         if pos != 0 {
-            return Err(Error::FastSpreadAlignmentError);
+            return Err(Error::FastSpreadAlignmentError(pos));
         }
 
         Ok(())

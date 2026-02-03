@@ -72,8 +72,7 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
         }
 
         if r.bits_remaining() > 0 {
-            println!("[DEBUG] bits remaining: {}", r.bits_remaining());
-            return Err(Error::Corruption);
+            return Err(Error::ExtraBitsInStream(r.bits_remaining()));
         }
 
         Ok(())
@@ -188,7 +187,7 @@ fn update_table<const N: usize>(
     match mode {
         Mode::Repeat => {
             if curr.is_none() {
-                return Err(Error::Corruption);
+                return Err(Error::MissingTableForRepeat);
             }
             Ok(0)
         }
@@ -200,7 +199,7 @@ fn update_table<const N: usize>(
             Ok(0)
         }
         Mode::RLE => {
-            let sym = *src.get(0).ok_or(Error::Corruption)?;
+            let sym = *src.get(0).ok_or(Error::EmptyRLESource)?;
             let mut norm = rzstd_fse::NormalizedDistribution::from_rle(sym)?;
             *curr = Some(rzstd_fse::DecodingTable::from_distribution(&mut norm)?);
             Ok(1)
@@ -254,7 +253,9 @@ const LL_TABLE: [(u32, u8); 36] = [
 ];
 
 fn decode_ll(code: u8, r: &mut rzstd_io::ReverseBitReader) -> Result<u32, Error> {
-    let &(baseline, n_bits) = LL_TABLE.get(code as usize).ok_or(Error::Corruption)?;
+    let &(baseline, n_bits) = LL_TABLE
+        .get(code as usize)
+        .ok_or(Error::InvalidFSECode(code))?;
 
     if n_bits == 0 {
         return Ok(baseline);
@@ -320,7 +321,9 @@ const ML_TABLE: [(u32, u8); 53] = [
 ];
 
 fn decode_ml(code: u8, r: &mut rzstd_io::ReverseBitReader) -> Result<u32, Error> {
-    let &(baseline, n_bits) = ML_TABLE.get(code as usize).ok_or(Error::Corruption)?;
+    let &(baseline, n_bits) = ML_TABLE
+        .get(code as usize)
+        .ok_or(Error::InvalidFSECode(code))?;
 
     if n_bits == 0 {
         return Ok(baseline);

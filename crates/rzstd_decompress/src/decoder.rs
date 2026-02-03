@@ -28,17 +28,14 @@ impl<'b, R: rzstd_io::Reader> Decoder<'b, R> {
             return Err(Error::InvalidMagicNum(magic_num));
         }
 
-        println!("DECODING FRAME");
         let frame = frame::Header::read(&mut self.ctx.src)?;
         let window_size = frame.window_size()? as usize;
 
         self.ctx.reset(window_size);
-        // println!("{:?}", &self.ctx);
 
         let mut flushed_idx = 0;
 
         loop {
-            println!("  DECODING BLOCK");
             let last = self.ctx.block()?;
             let current_idx = self.ctx.window_buf.index();
 

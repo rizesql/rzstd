@@ -13,5 +13,6 @@ description.workspace = true
 doctest = true
 
 [dependencies]
+miette.workspace = true
 proptest.workspace = true
 thiserror.workspace = true

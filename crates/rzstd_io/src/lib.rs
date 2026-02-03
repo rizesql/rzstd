@@ -7,21 +7,31 @@ pub use bit_reader::BitReader;
 pub use reader::Reader;
 pub use reverse_bit_reader::ReverseBitReader;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic)]
 pub enum Error {
     #[error("Stream is empty")]
+    #[diagnostic(
+        code(rzstd::io::empty_stream),
+        help("The input stream ended unexpectedly. Verify the input data is complete.")
+    )]
     EmptyStream,
 
     #[error("Stream end sentinel is missing")]
+    #[diagnostic(
+        code(rzstd::io::missing_sentinel),
+        help("The stream should end with a sentinel bit/byte but it was not found.")
+    )]
     MissingSentinel,
 
-    #[error("Not enough bits in stream")]
-    NotEnoughBits,
-
-    #[error("Copy operation out of bounds")]
-    CopyOutOfBounds,
+    #[error("Not enough bits in stream. Requested: {requested}, Remaining: {remaining}")]
+    #[diagnostic(
+        code(rzstd::io::not_enough_bits),
+        help("Attempted to read more bits than are available in the stream.")
+    )]
+    NotEnoughBits { requested: usize, remaining: usize },
 
     #[error(transparent)]
+    #[diagnostic(code(rzstd::io::io_error))]
     IO(#[from] std::io::Error),
 }
 

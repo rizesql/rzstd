@@ -391,6 +391,7 @@ dependencies = [
 name = "rzstd_io"
 version = "0.0.1"
 dependencies = [
+ "miette",
  "proptest",
  "thiserror",
 ]

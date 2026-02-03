@@ -11,12 +11,11 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
     pub fn literals_section(&mut self) -> Result<(), Error> {
         let header = Header::read(&mut self.src)?;
         if header.regenerated_size > MAX_BLOCK_SIZE {
-            return Err(Error::Corruption);
+            return Err(Error::LiteralsSizeTooLarge(header.regenerated_size));
         }
 
         let dst = &mut self.literals_buf[..header.regenerated_size as usize];
 
-        dbg!(header.ls_type);
         match header.ls_type {
             Type::Raw => self.src.read_exact(dst).map_err(Error::from),
 
@@ -30,7 +29,7 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
                 let compressed_size =
                     header.compressed_size.ok_or(Error::MissingCompressedSize)?;
                 if compressed_size > MAX_BLOCK_SIZE {
-                    return Err(Error::Corruption);
+                    return Err(Error::CompressedSizeTooLarge(compressed_size));
                 }
 
                 let scratch = &mut self.scratch_buf[..compressed_size as usize];
@@ -57,7 +56,6 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
         streams: Streams,
     ) -> Result<(), Error> {
         let decoder = rzstd_huff0::Decoder::new(table);
-        dbg!(streams);
 
         match streams {
             Streams::One => {
@@ -68,14 +66,16 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
                 }
 
                 if r.bits_remaining() > 0 {
-                    return Err(Error::Corruption);
+                    return Err(Error::ExtraBitsInStream(r.bits_remaining()));
                 }
 
                 Ok(())
             }
             Streams::Four => {
                 if src.len() < 6 {
-                    return Err(Error::Corruption);
+                    return Err(Error::JumpTableError(
+                        "Source too short for jump table".into(),
+                    ));
                 }
 
                 let mut readers = {
@@ -85,7 +85,9 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
 
                     let total = 6 + s0 + s1 + s2;
                     if total >= src.len() {
-                        return Err(Error::Corruption);
+                        return Err(Error::JumpTableError(
+                            "Jump table offsets exceed source length".into(),
+                        ));
                     }
 
                     [
@@ -98,7 +100,7 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
 
                 let chunk = (dst.len() + 3) / 4;
                 if dst.len() < 3 * chunk {
-                    return Err(Error::Corruption);
+                    return Err(Error::LiteralsBufferTooSmall);
                 }
 
                 let (out0, rem) = dst.split_at_mut(chunk);
@@ -158,7 +160,7 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
 
                 for r in &readers {
                     if r.bits_remaining() > 0 {
-                        return Err(Error::Corruption);
+                        return Err(Error::ExtraBitsInStream(r.bits_remaining()));
                     }
                 }
 

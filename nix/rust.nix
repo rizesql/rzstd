@@ -29,6 +29,7 @@ in
       pkgs.cargo-show-asm
       pkgs.clippy
       pkgs.rustfmt
+      pkgs.lldb
     ];
     RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
   });

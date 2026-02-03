@@ -22,6 +22,6 @@ fn main() -> miette::Result<()> {
     );
 
     println!("Starting decompression...");
-    decoder.decode(&mut writer)?;
+    decoder.decode(&mut writer).into_diagnostic()?;
     Ok(())
 }
