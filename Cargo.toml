@@ -1,17 +1,47 @@
 [workspace]
+resolver = "3"
 members = ["crates/*"]
-resolver = "2"
 
 [workspace.package]
-version = "0.0.0"
 authors = ["Rizescu Iulian-Ştefan <iulian.stefan.rizescu@gmail.com>"]
-rust-version = "1.90"
 license = "MIT"
 repository = "https://github.com/rizesql/rzstd"
-readme = "README.md"
+description = ""
+
+edition = "2024"
+
+[workspace.lints.clippy]
+pedantic = {level = "deny", priority = -1}
+nursery = {level = "deny", priority = -1}
+unwrap_used = "deny"
 
 [workspace.dependencies]
+rzstd_cli = { version = "0.0.1", path="crates/rzstd_cli" }
+rzstd_decompress = { version = "0.0.1", path="crates/rzstd_decompress" }
+rzstd_foundation = { version = "0.0.1", path="crates/rzstd_foundation" }
+rzstd_fse = { version = "0.0.1", path="crates/rzstd_fse" }
+rzstd_huff0 = { version = "0.0.1", path="crates/rzstd_huff0" }
+rzstd_io = { version = "0.0.1", path="crates/rzstd_io" }
 
-[profile.dist]
-inherits = "release"
-lto = "thin"
+miette = { version = "7.6.0", features = ["fancy"] }
+proptest = "1.9.0"
+thiserror = "2.0.17"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+debug = false
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.test]
+inherits = "dev"
+opt-level = 2

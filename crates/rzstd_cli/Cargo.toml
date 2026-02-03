@@ -1,0 +1,17 @@
+[package]
+name = "rzstd_cli"
+version = "0.0.1"
+authors.workspace = true
+edition.workspace = true
+include = ["/src"]
+license.workspace = true
+publish = false
+repository.workspace = true
+description.workspace = true
+
+[lib]
+doctest = true
+
+[dependencies]
+miette.workspace = true
+rzstd_decompress.workspace = true

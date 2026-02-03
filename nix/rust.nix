@@ -6,7 +6,7 @@
 let
   toolchain = inputs.fenix.packages.${system}.fromToolchainFile {
     file = ../rust-toolchain.toml;
-    sha256 = "sha256-SJwZ8g0zF2WrKDVmHrVG3pD2RGoQeo24MEXnNx5FyuI=";
+    sha256 = "sha256-sqSWJDUxc+zaz1nBWMAJKTAGBuGWP25GCftIOlCEAtA=";
   };
 
   rustPlatform = pkgs.makeRustPlatform {
@@ -24,6 +24,9 @@ in
   devShell = rzstd.overrideAttrs (super: {
     nativeBuildInputs = super.nativeBuildInputs ++ [
       pkgs.cargo-deny
+      pkgs.cargo-mutants
+      pkgs.cargo-nextest
+      pkgs.cargo-show-asm
       pkgs.clippy
       pkgs.rustfmt
     ];

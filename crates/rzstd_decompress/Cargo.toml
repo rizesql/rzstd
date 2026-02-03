@@ -1,0 +1,22 @@
+[package]
+name = "rzstd_decompress"
+version = "0.0.1"
+authors.workspace = true
+edition.workspace = true
+include = ["/src"]
+license.workspace = true
+publish = false
+repository.workspace = true
+description.workspace = true
+
+[lib]
+doctest = true
+
+[dependencies]
+rzstd_foundation.workspace = true
+rzstd_fse.workspace = true
+rzstd_huff0.workspace = true
+rzstd_io.workspace = true
+
+miette.workspace = true
+thiserror.workspace = true
