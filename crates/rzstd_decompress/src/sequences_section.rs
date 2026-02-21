@@ -2,44 +2,75 @@ use crate::{
     DefaultDistribution, LL_DIST, ML_DIST, OF_DIST, context::Context, prelude::*,
 };
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct Sequence {
     pub lit_len: u32,
     pub offset: u32,
     pub match_len: u32,
 }
 
+impl std::fmt::Debug for Sequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sequence")
+            .field("ll", &self.lit_len)
+            .field("ml", &self.match_len)
+            .field("of", &self.offset)
+            .finish()
+    }
+}
+
 impl<R: rzstd_io::Reader> Context<'_, R> {
-    pub fn sequence_section(&mut self, block_size: u32) -> Result<(), Error> {
-        let header = Header::read(&mut self.src)?;
+    pub fn sequence_section(&mut self, seq_size: usize) -> Result<(), Error> {
+        let scratch = &mut self.scratch_buf[..seq_size];
+        self.src.read_exact(scratch)?;
+        let mut reader: &[u8] = scratch;
+
+        let header = Header::read(&mut reader)?;
         if header.n_seqs == 0 {
             return Ok(());
         }
 
-        let scratch = &mut self.scratch_buf[..block_size as usize];
-        self.src.read_exact(scratch)?;
+        tracing::debug!("\nsequence section header={:?}\n", header);
 
         let modes = header.modes.as_ref().ok_or(Error::MissingModes)?;
 
         let mut idx = 0;
 
+        tracing::debug!("updating ll mode={:?}", modes.literal_lengths());
         idx += update_table(
             modes.literal_lengths(),
             LL_DIST,
-            &scratch[idx..],
+            &reader[idx..],
             &mut self.fse.ll,
         )?;
+        tracing::debug!(
+            "ll_table.len={:?}; ll_table={:?}",
+            self.fse.ll.as_ref().unwrap().table().len(),
+            self.fse.ll.as_ref().unwrap().table(),
+        );
 
-        idx += update_table(modes.offsets(), OF_DIST, &scratch[idx..], &mut self.fse.of)?;
+        tracing::debug!("\nupdating of mode={:?}", modes.offsets());
+        idx += update_table(modes.offsets(), OF_DIST, &reader[idx..], &mut self.fse.of)?;
+        tracing::debug!(
+            "of_table.len={:?}; of_table={:?}",
+            self.fse.of.as_ref().unwrap().table().len(),
+            self.fse.of.as_ref().unwrap().table(),
+        );
 
+        tracing::debug!("\nupdating ml mode={:?}", modes.match_lengths());
         idx += update_table(
             modes.match_lengths(),
             ML_DIST,
-            &scratch[idx..],
+            &reader[idx..],
             &mut self.fse.ml,
         )?;
+        tracing::debug!(
+            "ml_table.len={:?}; ml_table={:?}\n",
+            self.fse.ml.as_ref().unwrap().table().len(),
+            self.fse.ml.as_ref().unwrap().table(),
+        );
 
-        let mut r = rzstd_io::ReverseBitReader::new(&scratch[idx..])?;
+        let mut r = rzstd_io::ReverseBitReader::new(&reader[idx..])?;
 
         let ll_table = self.fse.ll.as_ref().ok_or(Error::MissingSeqTable)?;
         let of_table = self.fse.of.as_ref().ok_or(Error::MissingSeqTable)?;
@@ -49,39 +80,72 @@ impl<R: rzstd_io::Reader> Context<'_, R> {
         let mut of_dec = rzstd_fse::Decoder::new(of_table, &mut r)?;
         let mut ml_dec = rzstd_fse::Decoder::new(ml_table, &mut r)?;
 
-        let mut ll = ll_dec.decode(&mut r)?;
-        let mut ml = ml_dec.decode(&mut r)?;
-        let mut of = of_dec.decode(&mut r)?;
+        self.sequences_idx = header.n_seqs as usize;
+        let dst = &mut self.sequences_buf[..self.sequences_idx];
+        let mut dst_idx = 0;
 
-        for i in 0..header.n_seqs {
+        let mut ll = ll_dec.peek();
+        let mut of = of_dec.peek();
+        let mut ml = ml_dec.peek();
+
+        let offset = decode_of(of, &mut r)?;
+        let match_len = decode_ml(ml, &mut r)?;
+        let lit_len = decode_ll(ll, &mut r)?;
+
+        dst[dst_idx] = Sequence {
+            lit_len,
+            match_len,
+            offset,
+        };
+        dst_idx += 1;
+
+        for _ in 1..header.n_seqs {
+            ll_dec.update(&mut r)?;
+            ml_dec.update(&mut r)?;
+            of_dec.update(&mut r)?;
+
+            ll = ll_dec.peek();
+            of = of_dec.peek();
+            ml = ml_dec.peek();
+
             let offset = decode_of(of, &mut r)?;
             let match_len = decode_ml(ml, &mut r)?;
             let lit_len = decode_ll(ll, &mut r)?;
 
-            self.sequences_buf.push(Sequence {
+            dst[dst_idx] = Sequence {
                 lit_len,
                 match_len,
                 offset,
-            });
-
-            if i < header.n_seqs - 1 {
-                ll = ll_dec.decode(&mut r)?;
-                ml = ml_dec.decode(&mut r)?;
-                of = of_dec.decode(&mut r)?;
-            }
+            };
+            dst_idx += 1;
         }
+
+        tracing::debug!(
+            "seqs.len={:?}; seqs={:?}",
+            self.sequences_buf.len(),
+            self.sequences_buf
+        );
 
         if r.bits_remaining() > 0 {
             return Err(Error::ExtraBitsInStream(r.bits_remaining()));
         }
 
-        Ok(())
+        self.execute_sequences()
     }
 }
 
 pub struct Header {
     n_seqs: u32,
     modes: Option<CompressionModes>,
+}
+
+impl std::fmt::Debug for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SequencesHeader")
+            .field("num_sequences", &self.n_seqs)
+            .field("modes", &self.modes)
+            .finish()
+    }
 }
 
 impl Header {
@@ -117,6 +181,7 @@ impl Header {
     }
 }
 
+#[derive(Debug)]
 pub struct CompressionModes(u8);
 
 impl CompressionModes {
@@ -159,7 +224,7 @@ pub enum Mode {
     /// Standard FSE compression. A distribution table will be present. This
     /// mode must not be used when only one symbol is present;
     /// [Mode::RLE] should be used instead
-    FseCompressed,
+    FSECompressed,
 
     /// The table used in the previous [TODO Block] with [n_seqs] > 0 will be
     /// used again, or if this is the first block, the table in the
@@ -172,7 +237,7 @@ impl From<TwoBitFlag> for Mode {
         match val {
             TwoBitFlag::Zero => Self::Predefined,
             TwoBitFlag::One => Self::RLE,
-            TwoBitFlag::Two => Self::FseCompressed,
+            TwoBitFlag::Two => Self::FSECompressed,
             TwoBitFlag::Three => Self::Repeat,
         }
     }
@@ -194,17 +259,18 @@ fn update_table<const N: usize>(
         Mode::Predefined => {
             let mut norm = rzstd_fse::NormalizedDistribution::from_predefined(
                 dist.predefined_table(),
+                dist.accuracy_log() as u8,
             )?;
             *curr = Some(rzstd_fse::DecodingTable::from_distribution(&mut norm)?);
             Ok(0)
         }
         Mode::RLE => {
             let sym = *src.get(0).ok_or(Error::EmptyRLESource)?;
-            let mut norm = rzstd_fse::NormalizedDistribution::from_rle(sym)?;
-            *curr = Some(rzstd_fse::DecodingTable::from_distribution(&mut norm)?);
+            *curr = Some(rzstd_fse::DecodingTable::rle(sym));
+
             Ok(1)
         }
-        Mode::FseCompressed => {
+        Mode::FSECompressed => {
             let mut br = rzstd_io::BitReader::new(src)?;
             *curr = Some(rzstd_fse::DecodingTable::read(&mut br, dist.table_size())?);
 
@@ -252,11 +318,9 @@ const LL_TABLE: [(u32, u8); 36] = [
     (65536, 16),
 ];
 
+#[inline(always)]
 fn decode_ll(code: u8, r: &mut rzstd_io::ReverseBitReader) -> Result<u32, Error> {
-    let &(baseline, n_bits) = LL_TABLE
-        .get(code as usize)
-        .ok_or(Error::InvalidFSECode(code))?;
-
+    let &(baseline, n_bits) = &LL_TABLE[code as usize & 63];
     if n_bits == 0 {
         return Ok(baseline);
     }
@@ -320,11 +384,9 @@ const ML_TABLE: [(u32, u8); 53] = [
     (65539, 16),
 ];
 
+#[inline(always)]
 fn decode_ml(code: u8, r: &mut rzstd_io::ReverseBitReader) -> Result<u32, Error> {
-    let &(baseline, n_bits) = ML_TABLE
-        .get(code as usize)
-        .ok_or(Error::InvalidFSECode(code))?;
-
+    let &(baseline, n_bits) = &ML_TABLE[code as usize & 63];
     if n_bits == 0 {
         return Ok(baseline);
     }
@@ -332,6 +394,7 @@ fn decode_ml(code: u8, r: &mut rzstd_io::ReverseBitReader) -> Result<u32, Error>
     Ok(baseline + r.read(n_bits)? as u32)
 }
 
+#[inline(always)]
 fn decode_of(code: u8, r: &mut rzstd_io::ReverseBitReader) -> Result<u32, Error> {
     let extra = r.read(code)?;
     Ok((1u32 << (code & 0x1F)) + extra as u32)

@@ -20,3 +20,4 @@ rzstd_io.workspace = true
 miette.workspace = true
 proptest.workspace = true
 thiserror.workspace = true
+tracing.workspace = true

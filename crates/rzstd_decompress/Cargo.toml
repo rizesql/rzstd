@@ -20,3 +20,15 @@ rzstd_io.workspace = true
 
 miette.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+xxhash-rust = { version = "0.8.15", features = ["xxh64"] }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+zstd = "0.13"
+ruzstd = "0.8.2"
+
+[[bench]]
+name = "decode_bench"
+harness = false

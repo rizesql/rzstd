@@ -13,6 +13,11 @@ let
       amsmath
       mathtools
       lualatex-math
+      siunitx
+      enumitem
+      beamer
+      minted
+      pgfplots
       ;
   };
 in

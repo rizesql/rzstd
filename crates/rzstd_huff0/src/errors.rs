@@ -22,6 +22,13 @@ pub enum Error {
     )]
     TableOverflow,
 
+    #[error("Table underflow")]
+    #[diagnostic(
+        code(rzstd::huff0::table_underflow),
+        help("The Huffman table underflowed.")
+    )]
+    TableUnderflow,
+
     #[error("Weight {0} exceeds maximum bits {1}")]
     #[diagnostic(
         code(rzstd::huff0::weight_too_large),

@@ -2,6 +2,9 @@ use crate::MAGIC_NUM;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic)]
 pub enum Error {
+    #[error("Checksum mismatch: The decompressed data is corrupted.")]
+    ChecksumMismatch,
+
     #[error("Invalid magic number. Expected: {MAGIC_NUM:x}, got: {0:x}")]
     #[diagnostic(
         code(rzstd::decompress::invalid_magic_num),
@@ -78,6 +81,13 @@ pub enum Error {
         help("The block header is incomplete.")
     )]
     MissingBlockSize,
+
+    #[error("Missing frame content size")]
+    #[diagnostic(
+        code(rzstd::decompress::missing_frame_content_size),
+        help("The frame header is incomplete.")
+    )]
+    MissingFrameContentSize,
 
     #[error("Literals size {0} exceeds max block size")]
     #[diagnostic(

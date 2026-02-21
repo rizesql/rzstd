@@ -24,12 +24,10 @@ in
   devShell = rzstd.overrideAttrs (super: {
     nativeBuildInputs = super.nativeBuildInputs ++ [
       pkgs.cargo-deny
-      pkgs.cargo-mutants
+      pkgs.samply
       pkgs.cargo-nextest
-      pkgs.cargo-show-asm
       pkgs.clippy
       pkgs.rustfmt
-      pkgs.lldb
     ];
     RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
   });

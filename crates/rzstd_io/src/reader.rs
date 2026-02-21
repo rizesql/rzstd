@@ -1,6 +1,6 @@
-pub trait Reader: std::io::Read + ReadU8 + ReadU32 {}
+pub trait Reader: std::io::Read + ReadU8 + ReadU32 + std::fmt::Debug {}
 
-impl<T: std::io::Read> Reader for T {}
+impl<T: std::io::Read + std::fmt::Debug> Reader for T {}
 
 pub trait ReadU8: std::io::Read {
     fn read_u8(&mut self) -> std::io::Result<u8>;

@@ -2,7 +2,7 @@ $pdf_mode = 4;
 $postscript_mode = $dvi_mode = 0;
 
 $pdf_previewer = 'open -a Skim';
-$pdflatex = 'pdflatex -synctex=1 -interaction=nonstopmode';
+$pdflatex = 'pdflatex -shell-escape -synctex=1 -interaction=nonstopmode';
 @generated_exts = (@generated_exts, 'synctex.gz');
 
 $warnings_as_errors = 0;

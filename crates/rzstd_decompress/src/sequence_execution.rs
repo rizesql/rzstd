@@ -1,89 +1,127 @@
 use crate::{context::Context, prelude::*};
 
 impl<R: rzstd_io::Reader> Context<'_, R> {
-    pub fn execute_sequences(&mut self, block_size: u32) -> Result<(), Error> {
-        self.sequence_section(block_size)?;
+    pub fn execute_sequences(&mut self) -> Result<(), Error> {
+        tracing::debug!("\nsequence execution \n");
 
-        let mut lit_idx = self.literals_idx;
-        let literals = &self.literals_buf[..];
+        let literals = &self.literals_buf[..self.literals_idx];
+        let sequences = &self.sequences_buf[..self.sequences_idx];
+        let offset_hist = &mut self.offset_hist;
 
-        for seq in &self.sequences_buf {
+        let mut lit_idx = 0usize;
+        let mut literal: &[u8];
+
+        for seq in sequences {
             let lit_len = seq.lit_len as usize;
-
-            let next_lit_idx =
-                lit_idx
-                    .checked_add(lit_len)
-                    .ok_or(Error::LiteralsBufferOverread {
+            if lit_len > 0 {
+                let next_lit_idx = lit_idx.checked_add(lit_len).ok_or(
+                    Error::LiteralsBufferOverread {
                         idx: lit_idx,
                         len: lit_len,
-                    })?;
-            if next_lit_idx > literals.len() {
-                return Err(Error::LiteralsBufferOverread {
-                    idx: lit_idx,
-                    len: lit_len,
-                });
+                    },
+                )?;
+                if next_lit_idx > literals.len() {
+                    return Err(Error::LiteralsBufferOverread {
+                        idx: lit_idx,
+                        len: lit_len,
+                    });
+                }
+
+                literal = &literals[lit_idx..next_lit_idx];
+                self.window_buf.push_buf(literal);
+                lit_idx += lit_len;
+            } else {
+                literal = &[];
             }
 
-            let lit_chunk = &literals[lit_idx..next_lit_idx];
-            self.window_buf.push_buf(lit_chunk);
-            lit_idx = next_lit_idx;
+            let offset = update_offset_hist(offset_hist, seq.offset, lit_len)?;
 
             let match_len = seq.match_len as usize;
-            let offset = update_offset_hist(&mut self.offset_hist, seq.offset, lit_len)?;
 
-            self.window_buf.copy_within(offset, match_len)?;
+            tracing::debug!("offset_hist={:?}", offset_hist);
+            tracing::debug!(
+                "lit={:?}; offset={}, match={:?}",
+                literal,
+                offset,
+                match_len
+            );
+
+            if match_len > 0 {
+                self.window_buf.copy_within(offset, match_len)?;
+            }
         }
 
         if lit_idx < literals.len() {
             self.window_buf.push_buf(&literals[lit_idx..]);
         }
-        self.literals_idx = literals.len();
+        tracing::debug!(
+            "lit_remainder.len={:?}, lit_remainder={:?}",
+            literals[lit_idx..].len(),
+            &literals[lit_idx..]
+        );
+        self.literals_idx = 0;
         Ok(())
     }
 }
 
 fn update_offset_hist(
     history: &mut [usize; 3],
-    of_raw: u32,
+    offset: u32,
     lit_len: usize,
 ) -> Result<usize, Error> {
-    let offset = match of_raw {
-        1 => history[0],
-        2 => {
-            let of = history[1];
-            history[1] = history[0];
-            history[0] = of;
-            of
+    let next_offset = if lit_len > 0 {
+        match offset {
+            1..=3 => history[offset as usize - 1],
+            _ => {
+                //new offset
+                offset as usize - 3
+            }
         }
-        3 => {
-            let of = if lit_len == 0 {
-                history[0]
-                    .checked_sub(1)
-                    .ok_or(Error::InvalidOffsetCode(history[0] as u32))?
-            } else {
-                history[2]
-            };
-
-            history[2] = history[1];
-            history[1] = history[0];
-            history[0] = of;
-            of
-        }
-        _ => {
-            let of = (of_raw as usize)
-                .checked_sub(3)
-                .ok_or(Error::InvalidOffsetCode(of_raw))?;
-
-            history[2] = history[1];
-            history[1] = history[0];
-            history[0] = of;
-            of
+    } else {
+        match offset {
+            1..=2 => history[offset as usize],
+            3 => history[0] - 1,
+            _ => {
+                //new offset
+                offset as usize - 3
+            }
         }
     };
 
-    if offset == 0 {
-        return Err(Error::ZeroOffset);
+    //update history
+    if lit_len > 0 {
+        match offset {
+            1 => {
+                //nothing
+            }
+            2 => {
+                history[1] = history[0];
+                history[0] = next_offset;
+            }
+            _ => {
+                history[2] = history[1];
+                history[1] = history[0];
+                history[0] = next_offset;
+            }
+        }
+    } else {
+        match offset {
+            1 => {
+                history[1] = history[0];
+                history[0] = next_offset;
+            }
+            2 => {
+                history[2] = history[1];
+                history[1] = history[0];
+                history[0] = next_offset;
+            }
+            _ => {
+                history[2] = history[1];
+                history[1] = history[0];
+                history[0] = next_offset;
+            }
+        }
     }
 
-    Ok(offset)
+    Ok(next_offset)
 }

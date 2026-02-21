@@ -1,7 +1,10 @@
+use xxhash_rust::xxh64::Xxh64;
+
 use crate::{MAGIC_NUM, context::Context, errors::Error, frame};
 
 pub struct Decoder<'b, R: rzstd_io::Reader> {
     ctx: Context<'b, R>,
+    checksum: Xxh64,
 }
 
 const CHUNK: usize = 64 * 1024;
@@ -10,6 +13,7 @@ impl<'b, R: rzstd_io::Reader> Decoder<'b, R> {
     pub fn new(src: R, dst: &'b mut [u8], window_size: usize) -> Self {
         Decoder {
             ctx: Context::new(src, dst, window_size),
+            checksum: Xxh64::new(0),
         }
     }
 
@@ -46,7 +50,10 @@ impl<'b, R: rzstd_io::Reader> Decoder<'b, R> {
             let available = current_idx.saturating_sub(flushed_idx);
             if available >= CHUNK || last {
                 let data = &self.ctx.window_buf.as_slice()[flushed_idx..current_idx];
+
                 writer.write_all(data).map_err(Error::from)?;
+                self.checksum.update(data);
+
                 flushed_idx = current_idx;
             }
 
@@ -56,8 +63,12 @@ impl<'b, R: rzstd_io::Reader> Decoder<'b, R> {
         }
 
         if frame.has_checksum() {
-            let checksum = self.ctx.src.read_u32()?;
-            // TODO: checksum
+            let expected_checksum = self.ctx.src.read_u32()?;
+            let computed_checksum = self.checksum.digest() as u32;
+
+            if computed_checksum != expected_checksum {
+                return Err(Error::ChecksumMismatch);
+            }
         }
 
         Ok(true)

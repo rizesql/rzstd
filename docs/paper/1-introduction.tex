@@ -1,0 +1,52 @@
+\section{Introduction}
+\label{sec:introduction}
+
+The continued growth of network services, distributed storage systems, and large-scale data
+processing pipelines has made high-throughput lossless compression algorithms fundamental systems
+components. In such environments, decompression speed often dominates compression cost, as
+data is read many more times than it is written. Consequently, modern compression
+algorithms must optimize the dichotomy between approaching the Shannon entropy limit and
+maintaining high decompression throughput on modern CPU architectures.
+
+Decompression is frequently performed at the edges of networks, where the input bitstream is
+attacker-controlled. The internal decoding state is complex, and the decompressed output may
+greatly exceed the size of the compressed input, thereby making decompression logic a non-trivial
+attack surface. Historical vulnerabilities in compression libraries have included memory corruption,
+out-of-bounds memory accesses, invalid entropy table constructions, integer overflows in
+length calculations, and decompression bombs leading to resource exhaustion. Therefore, a secure
+decoder must enforce strict invariants on window bounds, state transitions, entropy table normalization,
+and total resource consumption, even under adversarial inputs.
+
+Traditional compression formats, such as Deflate, rely on Huffman coding for entropy representation.
+While efficient and widely used, Huffman coding assigns integer-length codes to symbols,
+which introduces redundancy relative to Shannon entropy and exposes decoding structures
+that are difficult to parallelize. From a security perspective, however, Huffman decoding usually
+relies on either constrained tree traversals or small, heavily bounded lookup tables, which
+constrain the decoder's dynamic state. Arithmetic coding eliminates the integer-length
+restriction and approaches optimal compression ratios, but its interval-based representation
+introduces strict serial dependencies that limit instruction-level parallelism. The
+architectural advancements required to overcome these throughput limitations alter the
+decoder's vulnerability landscape, shifting emphasis from arithmetic-bound computation toward
+memory-intensive state-machine execution.
+
+More recent methods based on Asymmetric Numeral Systems (ANS) structure entropy coding as finite-state
+machines. Zstandard, standardized in RFC 8878 \cite{Collet2021}, combines LZ77-style
+dictionary matching with Finite State Entropy (FSE), a table-based implementation of ANS.
+In this formulation, entropy decoding is reduced to a sequence of bounded state transitions
+and table lookups, reducing renormalization overhead and shortening dependency chains
+compared to arithmetic coding. This architectural shift better aligns with modern out-of-order
+processors while preserving near-optimal compression efficiency, which has led to
+widespread integration in systems software and network protocols.
+
+\bigskip
+
+This paper presents the design and implementation of a Zstandard decoder written in Rust,
+with emphasis on explicit invariant enforcement, bounded resource usage, and memory safety.
+The implementation validates entropy tables before use, enforces window bounds during
+decoding, and avoids unsafe memory operations. Beyond performance considerations, the work evaluates
+how Rust's spatial memory safety can be leveraged to reduce common classes of decompression
+vulnerabilities, and how the expressive type system can be used to make impossible states
+unrepresentable. The remainder of this paper analyzes prior entropy coding approaches (Section
+\ref{sec:sota}), details the Zstandard decoding model (Section \ref{sec:algorithm}), describes
+the implementation architecture (Section \ref{sec:implementation}), and evaluates
+performance and resource behavior (Section \ref{sec:experiments}).

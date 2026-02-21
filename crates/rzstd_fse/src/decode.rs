@@ -24,33 +24,34 @@ impl<'t, const N: usize> Decoder<'t, N> {
             let state = src.read(table.accuracy_log())?;
             State(state as u16)
         };
+        tracing::debug!(
+            "init FSE decoder; state={:?}; symbol={:?}",
+            state.0,
+            table[state]
+        );
 
         Ok(Self { table, state })
     }
 
     #[inline(always)]
-    pub fn decode(&mut self, src: &mut ReverseBitReader) -> Result<u8, Error> {
-        let entry = &self.table[self.state];
+    pub fn peek(&self) -> u8 {
+        debug_assert!((self.state.0 as usize) < self.table.entries.len());
+        self.table.entries[self.state.0 as usize].symbol
+    }
+
+    #[inline(always)]
+    pub fn update(&mut self, src: &mut ReverseBitReader) -> Result<(), Error> {
+        debug_assert!((self.state.0 as usize) < self.table.entries.len());
+        let entry = &self.table.entries[self.state.0 as usize];
 
         let bits = src.read(entry.n_bits)?;
         self.state = State(entry.baseline + bits as u16);
-
-        Ok(entry.symbol)
+        Ok(())
     }
 
     #[inline(always)]
     pub fn bits_required(&self) -> u8 {
         self.table[self.state].n_bits
-    }
-
-    #[inline(always)]
-    pub fn decode_padded(&mut self, src: &mut ReverseBitReader) -> u8 {
-        let entry = &self.table[self.state];
-
-        let bits = src.read_padded(entry.n_bits);
-        self.state = State(entry.baseline + bits as u16);
-
-        entry.symbol
     }
 }
 
@@ -60,6 +61,7 @@ pub struct NormalizedDistribution<const N: usize> {
     symbol_state: [u16; MAX_SYMBOLS],
     symbol_count: usize,
     has_low_prob: bool,
+    accuracy_log: u8,
 }
 
 impl<const N: usize> NormalizedDistribution<N> {
@@ -67,14 +69,11 @@ impl<const N: usize> NormalizedDistribution<N> {
         assert!(N.is_power_of_two());
 
         let max_accuracy_log = N.trailing_zeros() as u8;
-        let read_log = 5 + src.read(4)? as u8;
+        let read = src.read(4)? as u8;
+        let accuracy_log = 5 + read;
 
-        if !ACCURACY_LOG_RANGE.contains(&read_log) {
-            return Err(Error::InvalidAccuracyLog(read_log));
-        }
-
-        if read_log > max_accuracy_log {
-            return Err(Error::AccuracyLogMismatch(max_accuracy_log, read_log));
+        if accuracy_log > max_accuracy_log {
+            return Err(Error::AccuracyLogMismatch(max_accuracy_log, accuracy_log));
         }
 
         let mut final_counts = [0i16; MAX_SYMBOLS];
@@ -83,21 +82,31 @@ impl<const N: usize> NormalizedDistribution<N> {
         let mut symbol_idx = 0;
         let mut has_low_prob = false;
 
-        let mut remaining: i32 = N as i32;
+        let mut remaining: i32 = 1 << accuracy_log;
         while remaining > 0 {
             if symbol_idx >= MAX_SYMBOLS {
                 return Err(Error::TooManySymbols);
             }
 
-            let n_bits = (remaining + 1).ilog2() as u8;
+            let max_val = remaining + 1;
+            let n_bits = (32 - max_val.leading_zeros()) as u8;
 
-            let mut val = src.read(n_bits)? as i32;
-            let threshold = (1 << (n_bits + 1)) - (remaining + 2);
+            src.ensure_bits(n_bits)?;
+            let val = src.peek(n_bits) as i32;
+            let mask = (1 << (n_bits - 1)) - 1;
+            let threshold = (1 << n_bits) - max_val - 1;
+            let small = val & mask;
 
-            if val >= threshold {
-                let extra = src.read(1)? as i32;
-                val += extra * ((1 << n_bits) - threshold);
-            }
+            let val = if small < threshold {
+                src.consume(n_bits - 1);
+                small
+            } else if val > mask {
+                src.consume(n_bits);
+                val - threshold
+            } else {
+                src.consume(n_bits);
+                val
+            };
 
             let prob = (val - 1) as i16;
 
@@ -112,24 +121,65 @@ impl<const N: usize> NormalizedDistribution<N> {
                 remaining -= state as i32;
             } else {
                 loop {
-                    if symbol_idx >= MAX_SYMBOLS {
-                        return Err(Error::TooManySymbols);
-                    }
-
-                    let repeat = src.read(2)? as usize;
-
-                    if symbol_idx + repeat > MAX_SYMBOLS {
-                        return Err(Error::TooManySymbols);
-                    }
-
-                    symbol_idx += repeat;
-
-                    if repeat != 3 {
+                    let skip = src.read(2)? as usize;
+                    symbol_idx += skip;
+                    if skip != 3 {
                         break;
                     }
                 }
             }
         }
+
+        // let mut symbol_idx = 0;
+        // let mut has_low_prob = false;
+
+        // let mut remaining: i32 = N as i32;
+        // while remaining > 0 {
+        //     if symbol_idx >= MAX_SYMBOLS {
+        //         return Err(Error::TooManySymbols);
+        //     }
+
+        //     let n_bits = (remaining + 1).ilog2() as u8;
+
+        //     let mut val = src.read(n_bits)? as i32;
+        //     let threshold = (1 << (n_bits + 1)) - remaining - 2;
+
+        //     if val >= threshold {
+        //         let extra = src.read(1)? as i32;
+        //         val += extra * ((1 << n_bits) - threshold);
+        //     }
+
+        //     let prob = (val - 1) as i16;
+
+        //     has_low_prob |= val == 0;
+
+        //     let state = if prob == -1 { 1 } else { prob };
+        //     final_counts[symbol_idx] = prob;
+        //     symbol_state[symbol_idx] = state as u16;
+        //     symbol_idx += 1;
+
+        //     if prob != 0 {
+        //         remaining -= state as i32;
+        //     } else {
+        //         loop {
+        //             if symbol_idx >= MAX_SYMBOLS {
+        //                 return Err(Error::TooManySymbols);
+        //             }
+
+        //             let repeat = src.read(2)? as usize;
+
+        //             if symbol_idx + repeat > MAX_SYMBOLS {
+        //                 return Err(Error::TooManySymbols);
+        //             }
+
+        //             symbol_idx += repeat;
+
+        //             if repeat != 3 {
+        //                 break;
+        //             }
+        //         }
+        //     }
+        // }
 
         if remaining != 0 {
             return Err(Error::SumMismatch(remaining));
@@ -140,10 +190,11 @@ impl<const N: usize> NormalizedDistribution<N> {
             symbol_state,
             symbol_count: symbol_idx,
             has_low_prob,
+            accuracy_log,
         })
     }
 
-    pub fn from_predefined(counts: &[i16]) -> Result<Self, Error> {
+    pub fn from_predefined(counts: &[i16], accuracy_log: u8) -> Result<Self, Error> {
         let mut final_counts = [0i16; MAX_SYMBOLS];
         let mut symbol_state = [0u16; MAX_SYMBOLS];
         let mut symbol_count = 0;
@@ -170,43 +221,40 @@ impl<const N: usize> NormalizedDistribution<N> {
             symbol_state,
             symbol_count,
             has_low_prob,
-        })
-    }
-
-    pub fn from_rle(symbol: u8) -> Result<Self, Error> {
-        let sym_idx = symbol as usize;
-        if sym_idx >= MAX_SYMBOLS {
-            return Err(Error::TooManySymbols);
-        }
-
-        let mut final_counts = [0i16; MAX_SYMBOLS];
-        let mut symbol_state = [0u16; MAX_SYMBOLS];
-
-        final_counts[sym_idx] = N as i16;
-        symbol_state[sym_idx] = N as u16;
-
-        Ok(Self {
-            final_counts,
-            symbol_state,
-            symbol_count: sym_idx + 1,
-            has_low_prob: false,
+            accuracy_log,
         })
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C, align(4))]
+#[derive(Clone, Copy)]
+#[repr(align(4))]
 pub struct Entry {
-    symbol: u8,
-    n_bits: u8,
     baseline: u16,
+    n_bits: u8,
+    symbol: u8,
+}
+
+impl std::fmt::Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("base_line", &self.baseline)
+            .field("num_bits", &self.n_bits)
+            .field("symbol", &self.symbol)
+            .finish()
+    }
 }
 
 const_assert!(std::mem::size_of::<Entry>() == 4);
 const_assert!(std::mem::align_of::<Entry>() == 4);
 
+#[repr(align(64))]
 #[derive(Debug)]
-pub struct DecodingTable<const N: usize>([Entry; N]);
+pub struct DecodingTable<const N: usize> {
+    entries: [Entry; N],
+    accuracy_log: u8,
+}
+
+const_assert!(std::mem::size_of::<DecodingTable<512>>() % 64 == 0);
 
 impl<const N: usize> DecodingTable<N> {
     pub fn read(r: &mut rzstd_io::BitReader, count: usize) -> Result<Self, Error> {
@@ -218,39 +266,58 @@ impl<const N: usize> DecodingTable<N> {
         Self::from_distribution(&mut dist)
     }
 
+    pub fn rle(symbol: u8) -> Self {
+        let entries = [Entry {
+            symbol,
+            n_bits: 0,
+            baseline: 0,
+        }; N];
+        Self {
+            entries,
+            accuracy_log: 0,
+        }
+    }
+
     pub fn from_distribution(
         dist: &mut NormalizedDistribution<N>,
     ) -> Result<Self, Error> {
         assert!(N.is_power_of_two());
-        let accuracy_log = N.trailing_zeros() as u8;
+        let accuracy_log = dist.accuracy_log;
+        // let accuracy_log = N.trailing_zeros() as u8;
 
         if !ACCURACY_LOG_RANGE.contains(&accuracy_log) {
             return Err(Error::InvalidAccuracyLog(accuracy_log));
         }
 
-        let mut table = [Entry {
+        let mut entries = [Entry {
             symbol: 0,
             n_bits: 0,
             baseline: 0,
         }; N];
 
+        let table = &mut entries[..(1 << accuracy_log) as usize];
+
         if !dist.has_low_prob {
-            Self::spread_weights(dist, &mut table)?;
+            Self::spread_weights(dist, table)?;
         } else {
-            Self::spread_symbols_low_prob(dist, &mut table)?;
+            Self::spread_symbols_low_prob(dist, table)?;
         }
 
-        Self::finalize_table(&mut table, &mut dist.symbol_state, accuracy_log)?;
+        Self::finalize_table(table, &mut dist.symbol_state, accuracy_log)?;
 
-        Ok(Self(table))
+        Ok(Self {
+            entries,
+            accuracy_log,
+        })
     }
 
     fn spread_weights(
         dist: &NormalizedDistribution<N>,
-        table: &mut [Entry; N],
+        table: &mut [Entry],
     ) -> Result<(), Error> {
-        let step = (N >> 1) + (N >> 3) + 3;
-        let mask = N - 1;
+        let n = table.len();
+        let step = (n >> 1) + (n >> 3) + 3;
+        let mask = n - 1;
 
         let mut pos = 0;
 
@@ -293,23 +360,22 @@ impl<const N: usize> DecodingTable<N> {
     #[cold]
     fn spread_symbols_low_prob(
         dist: &NormalizedDistribution<N>,
-        table: &mut [Entry; N],
+        table: &mut [Entry],
     ) -> Result<(), Error> {
-        let step = (N >> 1) + (N >> 3) + 3;
-        let mask = N - 1;
-        let mut high_threshold = N - 1;
+        let n = table.len();
+        let step = (n >> 1) + (n >> 3) + 3;
+        let mask = n - 1;
+
+        let mut high_threshold = n;
 
         for (sym, &count) in dist.final_counts[..dist.symbol_count].iter().enumerate() {
             if count == -1 {
-                if high_threshold >= N {
-                    return Err(Error::TableOverflow);
-                }
+                high_threshold -= 1;
                 table[high_threshold] = Entry {
                     symbol: sym as u8,
                     n_bits: 0xFF,
                     baseline: 0,
                 };
-                high_threshold = high_threshold.wrapping_sub(1);
             }
         }
 
@@ -328,13 +394,13 @@ impl<const N: usize> DecodingTable<N> {
 
                 pos = (pos + step) & mask;
 
-                while pos > high_threshold {
+                while pos >= high_threshold {
                     pos = (pos + step) & mask;
                 }
             }
         }
 
-        if pos != 0 {
+        if high_threshold == n && pos != 0 {
             return Err(Error::FastSpreadAlignmentError(pos));
         }
 
@@ -342,10 +408,11 @@ impl<const N: usize> DecodingTable<N> {
     }
 
     fn finalize_table(
-        table: &mut [Entry; N],
+        table: &mut [Entry],
         symbol_state: &mut [u16; MAX_SYMBOLS],
         accuracy_log: u8,
     ) -> Result<(), Error> {
+        let n = table.len() as u16;
         for entry in table.chunks_exact_mut(4).flatten() {
             if entry.n_bits == 0 {
                 return Err(Error::TableUnderfilled);
@@ -363,14 +430,19 @@ impl<const N: usize> DecodingTable<N> {
             let n_bits = (accuracy_log + state.leading_zeros() as u8) - 15;
 
             entry.n_bits = n_bits;
-            entry.baseline = (state << n_bits).wrapping_sub(N as u16);
+            entry.baseline = (state << n_bits).wrapping_sub(n as u16);
         }
 
         Ok(())
     }
 
     const fn accuracy_log(&self) -> u8 {
-        N.trailing_zeros() as u8
+        self.accuracy_log
+    }
+
+    #[inline(always)]
+    pub fn table(&self) -> &[Entry] {
+        &self.entries[..(1 << self.accuracy_log)]
     }
 }
 
@@ -379,8 +451,8 @@ impl<const N: usize> std::ops::Index<State> for DecodingTable<N> {
 
     #[inline(always)]
     fn index(&self, index: State) -> &Self::Output {
-        assert!((index.0 as usize) < N);
-        &self.0[index.0 as usize]
+        debug_assert!((index.0 as usize) < self.table().len());
+        &self.entries[index.0 as usize]
     }
 }
 
@@ -413,6 +485,7 @@ mod tests {
             symbol_state,
             symbol_count: 36,
             has_low_prob: true,
+            accuracy_log: 6,
         };
 
         let table = DecodingTable::<64>::from_distribution(&mut dist)
@@ -430,7 +503,7 @@ mod tests {
         ];
 
         for (state_idx, sym, nb, base) in expected {
-            let entry = table.0[state_idx];
+            let entry = table.entries[state_idx];
             assert_eq!(entry.symbol, sym, "State {}: Symbol mismatch", state_idx);
             assert_eq!(entry.n_bits, nb, "State {}: Bits mismatch", state_idx);
             assert_eq!(entry.baseline, base, "State {}: Base mismatch", state_idx);
@@ -439,12 +512,12 @@ mod tests {
         // Verify a few late states from Appendix A
         // 60 | 35 | 6 | 0
         // 63 | 32 | 6 | 0
-        let entry_60 = table.0[60];
+        let entry_60 = table.entries[60];
         assert_eq!(entry_60.symbol, 35);
         assert_eq!(entry_60.n_bits, 6);
         assert_eq!(entry_60.baseline, 0);
 
-        let entry_63 = table.0[63];
+        let entry_63 = table.entries[63];
         assert_eq!(entry_63.symbol, 32);
         assert_eq!(entry_63.n_bits, 6);
         assert_eq!(entry_63.baseline, 0);
@@ -504,6 +577,7 @@ mod tests {
                 symbol_state,
                 symbol_count: weights.len(),
                 has_low_prob: false,
+                accuracy_log: current_sum as u8
             };
 
             let _ = DecodingTable::<N>::from_distribution(&mut dist)?;

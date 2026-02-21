@@ -26,6 +26,25 @@ impl<'src> BitReader<'src> {
     }
 
     #[inline(always)]
+    pub fn bits_remaining(&self) -> usize {
+        self.bit_count as usize + self.src.len() * 8
+    }
+
+    #[inline(always)]
+    pub fn ensure_bits(&mut self, n_bits: u8) -> Result<(), Error> {
+        if self.bit_count < n_bits {
+            self.refill();
+            if self.bit_count < n_bits {
+                return Err(Error::NotEnoughBits {
+                    requested: n_bits as usize,
+                    remaining: self.bits_remaining(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
     pub fn read(&mut self, n_bits: u8) -> Result<u64, Error> {
         assert!(n_bits <= 56);
 
@@ -48,7 +67,12 @@ impl<'src> BitReader<'src> {
 
     #[inline(always)]
     pub fn peek(&self, n_bits: u8) -> u64 {
-        assert!(n_bits <= self.bit_count);
+        assert!(
+            n_bits <= self.bit_count,
+            "expected: {n_bits}, got: {}; src: {:?}",
+            self.bit_count,
+            self.src
+        );
 
         self.buf & ((1u64 << n_bits) - 1)
     }
@@ -58,6 +82,19 @@ impl<'src> BitReader<'src> {
         self.index - (self.bit_count as usize / 8)
     }
 
+    #[inline(always)]
+    pub fn consume(&mut self, n_bits: u8) {
+        assert!(n_bits <= self.bit_count);
+        self.consume_unchecked(n_bits)
+    }
+
+    #[inline(always)]
+    fn consume_unchecked(&mut self, n_bits: u8) {
+        self.buf >>= n_bits;
+        self.bit_count -= n_bits;
+    }
+
+    #[inline(always)]
     #[cold]
     fn refill(&mut self) {
         debug_assert!(self.bit_count < 64);
@@ -87,6 +124,7 @@ impl<'src> BitReader<'src> {
         self.index += 8;
     }
 
+    #[inline(always)]
     #[cold]
     fn refill_cold(&mut self, count: usize) {
         let to_read = count.min(self.src.len());

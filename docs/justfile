@@ -1,2 +1,5 @@
 run:
-  latexmk -pvc main.tex
+    latexmk -pvc paper.tex
+
+presentation:
+    latexmk -pvc presentation.tex

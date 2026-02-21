@@ -1,0 +1,15 @@
+\section*{\abstractname}
+\label{sec:abstract}
+
+Modern lossless compression formats, such as Zstandard, rely on a combination of Finite State
+Entropy for symbol coding and auto-regressive back-reference mechanisms for signal reconstruction.
+This paper presents \textit{rzstd}, a memory-safe Rust implementation of the Zstandard
+decompression algorithm that explicitly models decoding as a bounded, finite-state process.
+The architecture enforces protocol invariants through constructive parsing, proactively validates
+mathematical constraints over discrete probability distributions, and utilizes an ahead-of-time
+memory allocation strategy to strictly bound the LZ77 sliding window routine. Empirical measurements
+using the Silesia Compression Corpus indicate that the implementation achieves a practical decompression
+throughput of approximately \qty{640}{\mebi\byte\per\s} on an ARM64 architecture. These
+results demonstrate that strict type-level invariant enforcement and safe memory semantics
+can be integrated into a signal processing pipeline while preserving baseline algorithmic
+scaling.

@@ -1,10 +1,9 @@
 mod bit_reader;
-mod bit_writer;
 mod reader;
 mod reverse_bit_reader;
 
 pub use bit_reader::BitReader;
-pub use reader::Reader;
+pub use reader::*;
 pub use reverse_bit_reader::ReverseBitReader;
 
 #[derive(Debug, thiserror::Error, miette::Diagnostic)]
@@ -23,7 +22,9 @@ pub enum Error {
     )]
     MissingSentinel,
 
-    #[error("Not enough bits in stream. Requested: {requested}, Remaining: {remaining}")]
+    #[error(
+        "Not enough bits in stream. Requested: {requested:?}, Remaining: {remaining:?}"
+    )]
     #[diagnostic(
         code(rzstd::io::not_enough_bits),
         help("Attempted to read more bits than are available in the stream.")

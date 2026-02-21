@@ -1,4 +1,4 @@
-@misc{rfc8878,
+@misc{Collet2021,
     series =    {Request for Comments},
     number =    8878,
     howpublished =  {RFC 8878},
@@ -11,4 +11,156 @@
     year =      2021,
     month =     feb,
     abstract =  {Zstandard, or "zstd" (pronounced "zee standard"), is a lossless data compression mechanism. This document describes the mechanism and registers a media type, content encoding, and a structured syntax suffix to be used when transporting zstd-compressed content via MIME. Despite use of the word "standard" as part of Zstandard, readers are advised that this document is not an Internet Standards Track specification; it is being published for informational purposes only. This document replaces and obsoletes RFC 8478.},
+}
+
+@misc{Nidhi2024,
+    series =    {Request for Comments},
+    number =    9659,
+    howpublished =  {RFC 9659},
+    publisher = {RFC Editor},
+    doi =       {10.17487/RFC9659},
+    url =       {https://www.rfc-editor.org/info/rfc9659},
+    author =    {Nidhi Jaju and W. Felix P. Handte},
+    title =     {{Window Sizing for Zstandard Content Encoding}},
+    pagetotal = 4,
+    year =      2024,
+    month =     sep,
+    abstract =  {Deployments of Zstandard, or "zstd", can use different window sizes to limit memory usage during compression and decompression. Some browsers and user agents limit window sizes to mitigate memory usage concerns, thereby causing interoperability issues. This document updates the window size limit in RFC 8878 from a recommendation to a requirement in HTTP contexts.},
+}
+
+
+@misc{Deutsch1996,
+    series =    {Request for Comments},
+    number =    1951,
+    howpublished =  {RFC 1951},
+    publisher = {RFC Editor},
+    doi =       {10.17487/RFC1951},
+    url =       {https://www.rfc-editor.org/info/rfc1951},
+    author =    {L. Peter Deutsch},
+    title =     {{DEFLATE Compressed Data Format Specification version 1.3}},
+    pagetotal = 17,
+    year =      1996,
+    month =     may,
+    abstract =  {This specification defines a lossless compressed data format that compresses data using a combination of the LZ77 algorithm and Huffman coding, with efficiency comparable to the best currently available general-purpose compression methods. This memo provides information for the Internet community. This memo does not specify an Internet standard of any kind.},
+}
+
+@ARTICLE{Huffman1952,
+  author={Huffman, David A.},
+  journal={Proceedings of the IRE},
+  title={A Method for the Construction of Minimum-Redundancy Codes},
+  year={1952},
+  volume={40},
+  number={9},
+  pages={1098-1101},
+  keywords={Transmitters},
+  doi={10.1109/JRPROC.1952.273898}
+}
+
+@inbook{Shannon1948,
+  author = {Shannon, Claude},
+  year = {2021},
+  month = {02},
+  pages = {121-134},
+  title = {A Mathematical Theory of Communication (1948)},
+  isbn = {9780262363174},
+  doi = {10.7551/mitpress/12274.003.0014}
+}
+
+@ARTICLE{ZivLempel1977,
+  author={Ziv, J. and Lempel, A.},
+  journal={IEEE Transactions on Information Theory},
+  title={A universal algorithm for sequential data compression},
+  year={1977},
+  volume={23},
+  number={3},
+  pages={337-343},
+  keywords={Encoding;Symbols;Silicon;Codes;Decoding;Data compression;Compression algorithms;Lower bound;Feeds;Upper bound},
+  doi={10.1109/TIT.1977.1055714}
+}
+
+@ARTICLE{Rissanen1976,
+  author={Rissanen, J. J.},
+  journal={IBM Journal of Research and Development},
+  title={Generalized Kraft Inequality and Arithmetic Coding},
+  year={1976},
+  volume={20},
+  number={3},
+  pages={198-203},
+  keywords={},
+  doi={10.1147/rd.203.0198}
+}
+
+@article{Witten1987,
+author = {Witten, Ian H. and Neal, Radford M. and Cleary, John G.},
+title = {Arithmetic coding for data compression},
+year = {1987},
+issue_date = {June 1987},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+volume = {30},
+number = {6},
+issn = {0001-0782},
+url = {https://doi.org/10.1145/214762.214771},
+doi = {10.1145/214762.214771},
+abstract = {The state of the art in data compression is arithmetic coding, not the better-known Huffman method. Arithmetic coding gives greater compression, is faster for adaptive models, and clearly separates the model from the channel encoding.},
+journal = {Commun. ACM},
+month = jun,
+pages = {520–540},
+numpages = {21}
+}
+
+@article{Duda2009,
+  author       = {Jarek Duda},
+  title        = {Asymmetric numeral systems},
+  journal      = {CoRR},
+  volume       = {abs/0902.0271},
+  year         = {2009},
+  url          = {http://arxiv.org/abs/0902.0271},
+  eprinttype   = {arXiv},
+  eprint       = {0902.0271},
+  timestamp    = {Mon, 27 Nov 2023 13:31:32 +0100},
+  biburl       = {https://dblp.org/rec/journals/corr/abs-0902-0271.bib},
+  bibsource    = {dblp computer science bibliography, https://dblp.org}
+}
+
+@misc{Pavlov2015,
+  author       = {Pavlov, Igor},
+  title        = {{LZMA} specification and {SDK}},
+  year         = {2015},
+  howpublished = {\url{https://www.7-zip.org/sdk.html}},
+  note         = {Accessed: 2026-02-15}
+}
+
+@misc{King2019,
+  author       = {King, Alexis},
+  title        = {Parse, don't validate},
+  year         = {2019},
+  month        = {Nov},
+  url          = {https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/},
+  note         = {Accessed: 2026-02-20}
+}
+
+
+@misc{Deorowicz2003,
+  author       = {Sebastian Deorowicz},
+  title        = {Silesia Compression Corpus},
+  howpublished = {\url{https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia}},
+  year         = {2003},
+  note         = {Silesia University}
+}
+
+@misc{CriterionRs,
+  author       = {Brook Heisler and contributors},
+  title        = {Criterion.rs: Statistics-driven benchmarking library for Rust},
+  howpublished = {\url{https://github.com/bheisler/criterion.rs}},
+  year         = {2026},
+  note         = {Accessed: 2026-02-21}
+}
+
+@misc{ruzstd,
+  author       = {{KillingSpark} and contributors},
+  title        = {ruzstd: A pure Rust implementation of the Zstandard compression format},
+  howpublished = {\url{https://github.com/KillingSpark/zstd-rs}},
+  year         = {2025},
+  note         = {Accessed: 2026-02-21}
 }

@@ -1,0 +1,47 @@
+\section{Conclusions and Future Work}
+\label{sec:cafw}
+
+This work presented \textit{rzstd}, a safety-oriented implementation of the Zstandard decompression
+algorithm that models entropy decoding as a bounded finite-state reconstruction process.
+By design, the implementation makes state transitions, normalization constraints, and window
+bounds explicit within the type system and execution model.
+
+Entropy coding schemes such as Finite State Entropy can be modelled in practice as deterministic
+transitions over discrete probability distributions. Therefore, correct decoding depends not
+only on reconstruction symbol sequence, but also on preserving structural invariants
+throughout evaluation. By encoding these constraints directly into the decoding architecture,
+\textit{rzstd} demonstrates how theoretical structures can be mapped to a memory-safe systems
+implementation without sacrificing asymptotic efficiency.
+
+Empirical evaluation shows that the decoder achieves throughput comparable to other safe Rust
+implementations, though it remains below the heavily optimized C reference library. While performance
+differences persist, the results suggest that explicit invariant enforcement and spatial
+memory safety can coexist with competitive decompression throughput in user-facing
+contexts.
+
+\paragraph{Future Work}
+
+Several directions remain to improve correctness coverage, implementation maturity, and
+feature completeness:
+
+\begin{itemize}
+  \item \textbf{Correctness and Conformance:} The XXH64 checksum mismatch observed in the
+    \texttt{mozilla} corpus entry must be resolved to ensure full conformance with RFC 8878.
+    Implementing fuzzing will further evaluate robustness against malformed and adversarial
+    inputs.
+
+  \item \textbf{Further Optimization:} Future iterations will focus on streaming sequence
+    execution, improving cache locality, and enabling bounds-check elision through
+    statically provable invariants to reduce the throughput overhead while preserving
+    safety guarantees.
+
+  \item \textbf{Protocol Extensions:} Supporting dictionary-based decompression and the
+    Zstandard Seekable Format will broaden the functional scope of the current
+    implementation.
+\end{itemize}
+
+To summarize, \textit{rzstd} illustrates that entropy-coded signal reconstruction can be expressed
+as a deterministic process operating within an explicitly bounded context in a safe systems
+language. The work highlights how careful architectural design, memory safety mechanisms and
+rigorous alignment with the model can reduce implementation risk while retaining practical performance
+characteristics.

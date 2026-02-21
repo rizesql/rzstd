@@ -11,6 +11,7 @@ pub struct Context<'out, R: rzstd_io::Reader> {
     pub literals_idx: usize,
 
     pub sequences_buf: Vec<Sequence>,
+    pub sequences_idx: usize,
 
     pub huff: HuffContext,
     pub fse: FSEContext,
@@ -25,10 +26,9 @@ impl<'out, R: rzstd_io::Reader> Context<'out, R> {
             src,
             window_buf: Window::new(dst, window_size),
             literals_buf: vec![0; MAX_BLOCK_SIZE as usize],
-            sequences_buf: vec![Sequence::default(); MAX_BLOCK_SIZE as usize],
-            // literals_buf: Vec::with_capacity(MAX_BLOCK_SIZE as usize),
-            // sequences_buf: Vec::with_capacity(MAX_BLOCK_SIZE as usize),
             literals_idx: 0,
+            sequences_buf: vec![Sequence::default(); MAX_BLOCK_SIZE as usize],
+            sequences_idx: 0,
             huff: HuffContext { table: None },
             fse: FSEContext {
                 ll: None,
@@ -37,7 +37,6 @@ impl<'out, R: rzstd_io::Reader> Context<'out, R> {
             },
             offset_hist: [1, 4, 8],
             scratch_buf: vec![0; MAX_BLOCK_SIZE as usize],
-            // scratch_buf: Vec::with_capacity(MAX_BLOCK_SIZE as usize),
         }
     }
 
@@ -45,9 +44,7 @@ impl<'out, R: rzstd_io::Reader> Context<'out, R> {
         self.window_buf.reset(window_size);
 
         self.literals_idx = 0;
-        // self.literals_buf.clear();
-
-        self.sequences_buf.clear();
+        self.sequences_idx = 0;
 
         self.huff = HuffContext { table: None };
         self.fse = FSEContext {
@@ -56,8 +53,6 @@ impl<'out, R: rzstd_io::Reader> Context<'out, R> {
             of: None,
         };
         self.offset_hist = [1, 4, 8];
-
-        // self.scratch_buf.clear();
     }
 }
 
@@ -73,7 +68,7 @@ pub struct FSEContext {
     pub of: Option<rzstd_fse::DecodingTable<{ OF_DIST.table_size() }>>,
 }
 
-impl<R: std::io::Read> std::fmt::Debug for Context<'_, R> {
+impl<R: std::io::Read + std::fmt::Debug> std::fmt::Debug for Context<'_, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Context")
             .field("window_buf", &self.window_buf)

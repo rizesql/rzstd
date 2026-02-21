@@ -1,0 +1,150 @@
+\section{Implementation}
+\label{sec:implementation}
+
+The \textit{rzstd} implementation of the Zstandard decompression model enforces the
+structural invariants and bounded resource usage analyzed in Section~\ref{sec:algorithm}
+to systematically mitigate classes of runtime failures. To promote deterministic execution even
+under adversarial conditions, the design is guided by three core principles: the explicit representation
+of valid states via the type system, the early rejection of malformed inputs at the
+parsing boundary, and deterministic memory management via ahead-of-time allocations.
+
+\subsection{Memory Architecture}
+\label{ssec:memory-architecture}
+
+To mitigate possible latency spikes and spatial safety risks, the implementation prohibits dynamic
+memory allocation on the execution hot path. Instead, it leverages the well-defined spatial
+bounds specified in RFC 8878 to utilize an ahead-of-time (AOT) allocation strategy. By
+decoupling memory provisioning from the signal reconstruction loop, the required memory footprint
+is committed deterministically before decoding begins. This enables cache locality through
+the use of dense, contiguous memory blocks and makes entire classes of resource-exhaustion attacks
+and out-of-memory panics impossible by design.
+
+This spatial safety is enforced primarily by externalizing output memory ownership. The
+\texttt{Decoder} does not allocate its own historical window buffer; instead, it shifts responsibility
+to the caller by requiring a provisioned mutable slice, \texttt{dst: \&'b mut [u8]}, which
+it encapsulates in a \texttt{Window} abstraction. By doing so, the decoder operates purely as
+a computation engine, decoupled from resource management, enhancing its spatial predictability.
+
+Internally, the \texttt{Decoder}'s scratch workspace is encapsulated within a shared \texttt{Context}
+struct. During its initialization, all necessary heap-allocated structures, such as literal
+and sequence buffers, and entropy decoding tables, are provisioned exactly once. Crucially,
+the capacity of these internal buffers is bounded according to the protocol-defined bounds (e.g.,
+using the $\qty{128}{\kilo\byte}$ maximum block size for literals and section buffers),
+remaining independent of the user-provisioned parameters.
+
+Post-initialization, the hot processing loop operates allocation-free. Between frames, the \texttt{Context}
+instance is reset via an $\mathcal{O}(1)$ operation that merely resets internal cursors, allowing
+existing memory to be safely overwritten. Notably, this strategy is made feasible by the serial
+nature of the decompression algorithm.
+
+To complement the allocation-free output generation, the architecture enforces a zero-copy
+data ingestion policy. By abstracting the input source behind a reader-independent interface,
+the decoder can consume read-only byte slices (\texttt{\&[u8]}) directly from the compressed
+bitstream, removing hidden heap allocations during the parsing phase. This implementation detail
+ensures the ingestion overhead remains constant and that the untrusted payload cannot trigger
+memory vulnerabilities.
+
+\subsection{Invariants Enforcement Mechanisms}
+\label{ssec:invariants-enforcement-mechanisms}
+
+Correct signal reconstruction requires that all intermediate states of the decoder satisfy
+the specification constraints. Rather than relying on scattered runtime assertions, the
+\textit{rzstd} implementation encodes these invariants directly in the parsing and type modeling
+stages.
+
+The architecture follows the principle of constructive parsing \cite{King2019}. Raw byte
+slices are never forwarded to the execution engine; instead, ingestion routines map the
+input bitstream to strongly typed domain representations. Thus, only semantically valid
+structures are permitted to cross this boundary.
+
+If a payload violates a specification invariant, the parsing mechanisms yield a typed domain
+error (via Rust's \texttt{Result} type), preventing the execution loop from advancing and consuming
+non-compliant inputs. For instance, the \texttt{frame::Header} is constructed through a
+single-pass parsing routine that resolves descriptor flags and conditionally parses
+dependent fields. Semantic relationships between flags and fields are validated before the structure
+is returned. Violations are mapped to explicit domain errors (e.g., \texttt{Error::MissingFrameContentSize}),
+ensuring that malformed inputs do not propagate into the decoding stage.
+
+\inputminted[fontsize=\footnotesize, baselinestretch=1, breaklines]{rust}{assets/4-2-lst-invariant-enforcement-mechanisms.m}
+\label{lst:4-2}
+
+As shown in Listing~\ref{lst:4-2}, the \texttt{Header::read} method enforces protocol constraints
+at the instantiation level, making it impossible to construct an invalid header. Downstream
+components therefore operate exclusively on structurally valid data.
+
+Invariant enforcement extends beyond parsing. Control-flow completeness is guaranteed
+through exhaustive pattern matching over block types (\texttt{Type::Raw}, \texttt{Type::RLE},
+or \texttt{Type::Compressed}). Any unhandled variant results in a compile-time error, eliminating
+entire classes of runtime control-flow omissions.
+
+\inputminted[fontsize=\footnotesize, baselinestretch=1, breaklines]{rust}{assets/4-2-lst-exhaustive-pattern-matching.m}
+
+Additionally, semantic differences between block variants are encoded directly in method signatures.
+Because compressed blocks lack a pre-computed decompressed size, the \texttt{block::Header::decompressed\_size}
+method returns \texttt{Option<u32>}. This forces downstream code to explicitly handle the
+absence of a value before proceeding, preventing invalid assumptions about block metadata.
+
+\subsection{Entropy Tables Construction Verification}
+
+As established in Section~\ref{sec:algorithm}, the deterministic execution of Finite State Entropy
+and Huffman decoding strictly depends on the integrity of their underlying discrete probability
+models. The specification requires that normalized symbol frequencies sum exactly to
+$2^{\mathtt{Accuracy\_Log}}$, which defines the size of the discrete state interval. This
+precondition ensures that the decoding table forms a complete and non-overlapping
+partition in the finite state space.
+
+During table construction, violation of this invariant would imply either oversubscription or
+undersubscription (unassigned states). In lower-level implementations, such inconsistencies
+may lead to undefined state transitions or out-of-bounds memory writes. Although Rust
+prevents spatial memory corruption by bounds checking, unhandled violations would still manifest
+as runtime panics. In a network-facing decoder, this transforms a memory corruption vulnerability
+into a Denial of Service vector by terminating the host process.
+
+To safely instantiate the decoding structures, the \textit{rzstd} implementation performs complete
+mathematical validation before constructing the decoding table. The ingestion routine
+aggregates transmitted symbol weights and ensures that their sum matches exactly the
+required $2^{\mathtt{Accuracy\_Log}}$. Otherwise, the operation is aborted before any
+table memory is initialized.
+
+\inputminted[fontsize=\footnotesize, baselinestretch=1, breaklines]{rust}{assets/4-3-lst-norm-dist-verification.m}
+\label{lst:4-3}
+
+Aligning with the data modeling methodology detailed in Section~\ref{ssec:invariants-enforcement-mechanisms},
+this pre-validation maps probability inconsistencies to structured domain errors (in this case
+\texttt{Error::SumMismatch}) rather than allowing propagation into the execution stage.
+This guarantees that downstream execution loops operate exclusively on mathematically
+consistent state spaces.
+
+\subsection{Auto-Regressive Signal Reconstruction}
+
+As established in Section~\ref{ssec:sequence-execution}, sequence execution reconstructs
+the signal through an auto-regressive feedback mechanism. Each match references a previously
+regenerated segment, requiring the decoder to evaluate a recursive data dependency while
+operating within a bounded sliding window.
+
+Under the ahead-of-time memory model established in Section~\ref{ssec:memory-architecture},
+the implementation must emulate an unbounded sliding window over a fixed-capacity buffer.
+This is achieved through the \texttt{Window} abstraction, which centralizes all signal
+regeneration. When the write cursor approaches the buffer limit, it shifts the most recent
+window data to the base address. This preserves the linear addressing of the AR model,
+without introducing dynamic memory allocations or modulo arithmetic in the hot path.
+
+Prior to sequence evaluation, \texttt{Window::copy\_within} validates that the requested
+offset does not exceed the available history, enforcing the causality constraint typical for
+LZ-style reconstruction. Then, the routine dispatches to specialized cases; if
+$\mathtt{offset}\geq \mathtt{match\_length}$, the source and destination segments are disjoint,
+allowing a direct slice copy. Furthermore, if the $\mathtt{offset}= 1$, reconstruction reduces
+to a constant signal (RLE), which is implemented as a memory fill.
+
+The last case corresponds to overlapping regions, where $\mathtt{offset}< \mathtt{match\_length}$
+and the signal becomes periodic. Rather than performing a byte-wise copy, the implementation
+uses a more efficient exponential copy strategy. It first copies the fundamental period
+defined by the $\mathtt{offset}$, and then it iteratively doubles the generated segment until
+the required length is reached. This resolves the recursive dependency in
+$\mathcal{O}(\log \mathtt{match\_length})$ memory operations, while preserving correct overlap
+semantics.
+
+Listing~\ref{lst:4-4} illustrates the complete implementation.
+
+\inputminted[fontsize=\footnotesize, baselinestretch=1, breaklines]{rust}{assets/4-4-lst-window-copy-within.m}
+\label{lst:4-4}

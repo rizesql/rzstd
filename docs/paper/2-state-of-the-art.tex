@@ -1,0 +1,107 @@
+\section{State of the Art}
+\label{sec:sota}
+
+The evolution of entropy coding methods reflects a tension between compression optimality,
+computational dependency structure, and implementation complexity. These factors directly
+influence both performance characteristics and the validation burden imposed on decoders
+operating on adversarial input. To contextualize the architectural decisions behind Zstandard,
+this section analyzes the mathematical and architectural properties of Huffman coding, arithmetic
+coding, and ANS-based methods, with a focus on performance implications and validation complexity.
+
+\subsection{Deflate}
+
+\textit{Deflate} \cite{Deutsch1996} combines LZ77 \cite{ZivLempel1977} dictionary matching with
+standard Huffman coding \cite{Huffman1952}. In Huffman coding, symbols are assigned integer-length
+prefix-free codes, and the expected code length $L$ satisfies:
+
+\begin{equation}
+  H(X) \leq L < H(X) + 1
+\end{equation}
+
+where $H(X)$ is the Shannon entropy of the source distribution. The redundancy is
+therefore bounded by less than one bit per symbol. While small in absolute terms, this
+constraint prevents exact representation of highly skewed probability distributions.
+
+From an architectural standpoint, Deflate decoding introduces several structural constraints.
+Bit-level extraction from a packed stream creates tight data dependencies, while canonical Huffman
+decoding often relies on conditional logic that increases branch misprediction rates.
+Additionally, LZ77 back-references introduce data-dependent memory copies whose lengths and
+offsets are computed at runtime, creating read-after-write dependencies within the output
+buffer. From a security perspective, this dynamic offset calculation introduces a common
+source of Out-of-Bounds (OOB) memory corruption, where an attacker manipulates a back-reference
+to point outside the dictionary, or forces an integer length to overflow, potentially leading
+to arbitrary OOB reads or buffer overflows.
+
+From a validation perspective, Deflate decoders must verify that dynamically constructed
+Huffman trees are neither oversubscribed nor incomplete, respect maximum depth constraints,
+and define a valid prefix code. Historically, incorrect validation resulted in memory
+corruption, excessive recursion depth, or infinite decoding loops, thereby increasing the number
+of structural invariants that must be enforced under adversarial input, even if it remains
+algorithmically simple.
+
+\subsection{Arithmetic Coding}
+
+\textit{Arithmetic Coding} (AC) \cite{Rissanen1976, Witten1987} overcomes the integer-bit
+constraints of Huffman coding by representing an entire message as a single fractional
+number within the half-open interval $[0, 1)$. During decoding, this interval is
+iteratively refined according to the symbol probability model.
+
+Arithmetic coding achieves near-optimal compression rates, arbitrarily close to Shannon entropy,
+but it incurs higher computational overhead. The interval representation induces a strictly
+sequential dependency chain: decoding the symbol $n+1$ depends on the interval state
+computed for symbol $n$. Each step involves interval subdivision, multiplication or
+subtraction operations, and iterative renormalizations to maintain numerical stability under
+finite-precision arithmetic. While highly efficient in terms of compression ratio, the strictly
+sequential dependency chain limits instruction-level parallelism and inhibits aggressive pipelining.
+
+Validation complexity differs from tree-based methods, as no explicit structure must be
+constructed. However, decoders must preserve interval invariants (e.g., correctly defined interval
+bounds, non-zero interval widths) and prevent numerical overflow during renormalization.
+Improper handling may lead to incorrect decoding or denial-of-service conditions through
+resource exhaustion under adversarial inputs. Thus, while arithmetic coding reduces
+structural validation requirements, it introduces arithmetic correctness constraints that must
+be carefully maintained.
+
+Although optimized variants, such as range coding, reduce constant factors, the core
+structure remains sequential. Consequently, arithmetic coding is used in contexts where
+compression ratio is prioritized over raw execution speed (e.g., LZMA \cite{Pavlov2015}).
+
+\subsection{Asymmetric Numeral Systems and Finite State Entropy}
+
+Asymmetric Numeral Systems (ANS) \cite{Duda2009} represents entropy coding using a deterministic
+finite-state machine, instead of maintaining a shrinking interval of sub-unitary values. ANS
+encodes information into a single integer state that evolves deterministically with each decoded
+symbol, whose logarithm mathematically approximates the total information content of the
+processed message. Each decoding step corresponds to a deterministic state transition that emits
+a symbol and consumes a fixed number of bits.
+
+In the tabled ANS (tANS) variant, implemented in Zstandard as \textit{Finite State Entropy}
+(FSE), the infinite state space is restricted to a finite half-open interval $[L, 2L)$. State
+transitions and consumed bit counts are precomputed into lookup tables, which render the
+entropy decoding into a sequence of table-driven state updates:
+
+\begin{equation}
+  \mathit{state}_{n+1}= \mathit{next}[\mathit{state}_{n}] + \mathit{read}(\mathit{nBits}[\mathit{state}
+  _{n}])
+\end{equation}
+
+where $\mathit{next}$ contains the base transition, and $\mathit{nBits}$ specifies the
+number of bits to consume from the bitstream. FSE maintains near-optimal entropy efficiency
+and reduces the dependency chain depth relative to arithmetic coding by replacing iterative
+interval renormalization with bounded table lookups and bit extraction. However, this shift
+introduces different trade-offs: performance becomes sensitive to table size and cache
+locality, and correctness depends on enforcing table invariants. Because $\mathit{next}$
+is accessed via a memory array lookup, malformed normalization tables may induce invalid state
+transitions, forcing the state machine outside the bounded state interval, potentially leaking
+adjacent memory or process termination if bounds are not enforced. As such, a normalization
+table is valid if its entries sum to the expected normalization constant and all resulting transitions
+remain within the bounded state interval.
+
+\bigskip
+
+The progress from Huffman coding to arithmetic coding and finally ANS-based methods
+reflects a broader systems trend: reducing serial arithmetic dependencies in favor of structured
+state machines that better exploit modern processor architectures. Each approach
+redistributes complexity across arithmetic operations, in-memory representations, and
+validation logic. For decoders operating in adversarial contexts, these trade-offs
+influence not only throughput, but also the nature of the attack surface.

@@ -13,71 +13,66 @@ const_assert!(FSE_TABLE_SIZE == 64);
 
 pub struct Decoder<'t, const N: usize = TABLE_SIZE> {
     table: &'t DecodingTable<N>,
+    state: u64,
 }
 
 impl<'t, const N: usize> Decoder<'t, N> {
-    pub fn new(table: &'t DecodingTable<N>) -> Self {
-        Self { table }
+    pub fn new(table: &'t DecodingTable<N>, r: &mut rzstd_io::ReverseBitReader) -> Self {
+        let state = r.read_padded(table.max_bits) as u64;
+        Self { table, state }
     }
 
     #[inline(always)]
-    pub fn decode(&self, r: &mut rzstd_io::ReverseBitReader) -> Result<u8, Error> {
-        r.ensure_bits(self.table.max_bits)?;
-        Ok(self.decode_unchecked(r))
-    }
+    pub fn decode(&mut self, r: &mut rzstd_io::ReverseBitReader) -> u8 {
+        debug_assert!((self.state as usize) < self.table.entries().len());
+        let state = self.table.entries[self.state as usize];
+        let new_bits = r.read_padded(state.n_bits);
 
-    #[inline(always)]
-    pub fn decode_padded(&self, r: &mut rzstd_io::ReverseBitReader) -> u8 {
-        let bit_count = r.bit_count();
-        let peek_bits = bit_count.min(self.table.max_bits);
-        let peeked = r.peek(peek_bits) as usize;
-        let entry = self.table.entries[peeked];
-        let to_consume = entry.n_bits.min(bit_count);
-        r.consume(to_consume);
+        self.state <<= state.n_bits;
+        self.state &= self.table.entries().len() as u64 - 1;
+        self.state |= new_bits;
 
-        entry.symbol
-    }
-
-    #[inline(always)]
-    pub fn decode4(&self, r: &mut rzstd_io::ReverseBitReader) -> Result<[u8; 4], Error> {
-        r.ensure_bits(4 * MAX_BITS)?;
-
-        Ok([
-            self.decode_unchecked(r),
-            self.decode_unchecked(r),
-            self.decode_unchecked(r),
-            self.decode_unchecked(r),
-        ])
-    }
-
-    #[inline(always)]
-    fn decode_unchecked(&self, r: &mut rzstd_io::ReverseBitReader) -> u8 {
-        let peeked = r.peek(self.table.max_bits) as usize;
-        let entry = self.table.entries[peeked];
-        r.consume(entry.n_bits);
-
-        entry.symbol
+        state.symbol
     }
 }
 
-#[repr(C, align(4))]
-#[derive(Debug, Clone, Copy)]
+#[repr(align(4))]
+#[derive(Clone, Copy)]
 pub struct Entry {
     symbol: u8,
     n_bits: u8,
+}
+
+impl std::fmt::Debug for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Entry")
+            .field("symbol", &self.symbol)
+            .field("num_bits", &self.n_bits)
+            .finish()
+    }
 }
 
 #[repr(align(64))]
 #[derive(Debug)]
 pub struct DecodingTable<const N: usize = TABLE_SIZE> {
     entries: [Entry; N],
+    n_entries: usize,
     max_bits: u8,
 }
+const_assert!(std::mem::size_of::<DecodingTable>() % 64 == 0);
 
 impl<const N: usize> DecodingTable<N> {
     pub fn read(src: &[u8]) -> Result<(Self, usize), Error> {
+        tracing::debug!("reading HUFF0 table");
+        tracing::debug!("src.len={:?}; src={:?}", src.len(), src);
+
         let mut weights = [0u8; 256];
         let (weights_count, consumed) = Self::read_weights(src, &mut weights)?;
+        tracing::debug!(
+            "weights.len={:?}; weights={:?}",
+            weights[..weights_count].len(),
+            &weights[..weights_count]
+        );
 
         for &w in &weights[..weights_count] {
             if w > MAX_BITS {
@@ -86,12 +81,18 @@ impl<const N: usize> DecodingTable<N> {
         }
 
         let table = Self::from_weights(&weights[..weights_count])?;
+        tracing::debug!(
+            "huff0.len={:?}; huff0={:?}",
+            table.n_entries,
+            table.entries()
+        );
         Ok((table, consumed))
     }
 
     fn from_weights(weights: &[u8]) -> Result<Self, Error> {
         let mut sum = 0u32;
         let mut max_w = 0u8;
+        let mut bit_rank = [0u32; (MAX_BITS + 1) as usize];
 
         for &w in weights {
             if w <= 0 {
@@ -100,55 +101,40 @@ impl<const N: usize> DecodingTable<N> {
 
             sum += 1 << (w - 1);
             max_w = max_w.max(w);
+            bit_rank[w as usize] += 1;
         }
 
         if sum == 0 {
             return Err(Error::ZeroWeightSum);
         }
 
-        let table_log = if sum <= 1 {
-            1
-        } else {
-            32 - (sum - 1).leading_zeros() as u8
-        }
-        .max(max_w);
-
-        if table_log > MAX_BITS {
-            return Err(Error::TableLogTooLarge(table_log, MAX_BITS));
-        }
-
-        let target = 1 << table_log;
+        let max_bits = sum.ilog2() as u8 + 1;
+        let target = 1 << max_bits;
         let remainder = target - sum;
 
         if remainder == 0 || !remainder.is_power_of_two() {
             return Err(Error::InvalidInferredWeight(remainder));
         }
 
-        let inferred_weight = (remainder.trailing_zeros() as u8) + 1;
-
-        let mut bit_rank = [0u32; (MAX_BITS + 1) as usize];
-        for &w in weights {
-            if w <= 0 {
-                continue;
-            }
-
-            bit_rank[w as usize] += 1;
-        }
+        let inferred_weight = remainder.ilog2() as u8 + 1;
         bit_rank[inferred_weight as usize] += 1;
 
         let mut next_code = [0u32; (MAX_BITS + 1) as usize];
         let mut curr = 0u32;
 
-        for w in 1..=table_log as usize {
+        for w in 1..=max_bits as usize {
             next_code[w] = curr;
-            curr = (curr + bit_rank[w] + 1) >> 1;
+            curr += bit_rank[w] << (w - 1);
+        }
+
+        if curr != target {
+            return Err(Error::TableUnderflow);
         }
 
         let mut entries = [Entry {
             symbol: 0,
             n_bits: 0,
         }; N];
-        let entries_active = &mut entries[..(1 << table_log)];
 
         for (sym, &w) in weights
             .iter()
@@ -159,38 +145,25 @@ impl<const N: usize> DecodingTable<N> {
                 continue;
             }
 
-            let n_bits = table_log + 1 - w;
+            let code_start = next_code[w as usize];
+            let n_bits = max_bits - (w - 1);
+            let num_slots = 1 << (w - 1);
 
-            let code = next_code[w as usize];
-            next_code[w as usize] += 1;
-
-            if n_bits > table_log {
-                return Err(Error::TableOverflow);
-            }
-
-            let stride = 1 << n_bits;
-            let count = 1 << (table_log - n_bits);
-
-            let idx = (code.reverse_bits() >> (32 - n_bits)) as usize;
-            for target in entries_active
-                .iter_mut()
-                .skip(idx)
-                .step_by(stride)
-                .take(count)
-            {
-                if target.n_bits != 0 {
-                    return Err(Error::EntryOverwrite(idx));
-                }
-                *target = Entry {
+            for i in 0..num_slots {
+                let idx = (code_start as usize) + i;
+                entries[idx] = Entry {
                     symbol: sym as u8,
                     n_bits,
                 };
             }
+
+            next_code[w as usize] += num_slots as u32;
         }
 
         Ok(Self {
             entries,
-            max_bits: table_log,
+            n_entries: target as usize,
+            max_bits,
         })
     }
 
@@ -208,8 +181,8 @@ impl<const N: usize> DecodingTable<N> {
             let consumed = Self::read_weights_direct(src, out, count)?;
             Ok((count as usize, consumed + 1))
         } else {
-            let consumed = Self::read_weights_compressed(src, out, header)?;
-            Ok((256, consumed + 1))
+            let num_weights = Self::read_weights_compressed(src, out, header)?;
+            Ok((num_weights, header as usize + 1))
         }
     }
 
@@ -267,64 +240,64 @@ impl<const N: usize> DecodingTable<N> {
     fn read_weights_compressed(
         src: &[u8],
         out: &mut [u8; 256],
-        count: u8,
+        compressed_size: u8,
     ) -> Result<usize, Error> {
-        let count = count as usize;
-        if src.len() < count {
+        let compressed_size = compressed_size as usize;
+        if src.len() < compressed_size {
             return Err(Error::IO(rzstd_io::Error::NotEnoughBits {
-                requested: count * 8,
+                requested: compressed_size * 8,
                 remaining: src.len() * 8,
             }));
         }
 
-        let buf = &src[..count];
+        let mut table_reader = rzstd_io::BitReader::new(src)?;
+        let table = rzstd_fse::DecodingTable::<FSE_TABLE_SIZE>::read(
+            &mut table_reader,
+            compressed_size,
+        )?;
+        let mut br = rzstd_io::ReverseBitReader::new(
+            &src[table_reader.bytes_consumed()..compressed_size],
+        )?;
 
-        let mut table_reader = rzstd_io::BitReader::new(buf)?;
-        let table =
-            rzstd_fse::DecodingTable::<FSE_TABLE_SIZE>::read(&mut table_reader, count)?;
-
-        let weights_slice = &buf[table_reader.bytes_consumed()..];
-        let mut weights_reader = rzstd_io::ReverseBitReader::new(weights_slice)?;
-
-        let mut dec1 = rzstd_fse::Decoder::new(&table, &mut weights_reader)?;
-        let mut dec2 = rzstd_fse::Decoder::new(&table, &mut weights_reader)?;
-
-        let limit = if count > 8 { count - 8 } else { 0 };
+        let mut dec1 = rzstd_fse::Decoder::new(&table, &mut br)?;
+        let mut dec2 = rzstd_fse::Decoder::new(&table, &mut br)?;
 
         let mut idx = 0;
-        while idx < limit {
-            out[idx] = dec1.decode_padded(&mut weights_reader);
-            out[idx + 1] = dec2.decode_padded(&mut weights_reader);
-            idx += 2;
-        }
-
-        while idx < count {
-            let last = dec1.bits_required() as usize > weights_reader.bits_remaining();
-            out[idx] = dec1.decode_padded(&mut weights_reader);
+        while idx < out.len() {
+            out[idx] = dec1.peek();
             idx += 1;
-            if last || idx >= count {
+
+            if dec1.bits_required() as usize > br.bits_remaining() {
+                out[idx] = dec2.peek();
+                idx += 1;
                 break;
             }
 
-            let last = dec2.bits_required() as usize > weights_reader.bits_remaining();
-            out[idx] = dec2.decode_padded(&mut weights_reader);
+            dec1.update(&mut br)?;
+
+            out[idx] = dec2.peek();
             idx += 1;
-            if last {
-                if idx < count {
-                    out[idx] = dec1.decode_padded(&mut weights_reader);
-                }
+
+            if dec2.bits_required() as usize > br.bits_remaining() {
+                out[idx] = dec1.peek();
+                idx += 1;
                 break;
             }
+
+            dec2.update(&mut br)?;
         }
 
-        Ok(count)
+        Ok(idx)
+    }
+
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries[..self.n_entries]
     }
 }
 
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use rzstd_io::ReverseBitReader;
 
     use super::*;
 
@@ -335,38 +308,21 @@ mod tests {
 
         let data = [0x80, 0x0D];
         let mut reader = rzstd_io::ReverseBitReader::new(&data)?;
-        let decoder = Decoder::new(&table);
+        let mut decoder = Decoder::new(&table, &mut reader);
 
-        let sym = decoder.decode(&mut reader)?;
+        let sym = decoder.decode(&mut reader);
         assert_eq!(sym, 0, "Expected A (0)");
 
-        let sym = decoder.decode(&mut reader)?;
+        let sym = decoder.decode(&mut reader);
         assert_eq!(sym, 1, "Expected B (1)");
 
-        let sym = decoder.decode(&mut reader)?;
+        let sym = decoder.decode(&mut reader);
         assert_eq!(sym, 4, "Expected E (4)");
 
-        let sym = decoder.decode(&mut reader)?;
+        let sym = decoder.decode(&mut reader);
         assert_eq!(sym, 5, "Expected F (5)");
 
         assert_eq!(reader.bits_remaining(), 0);
-        Ok(())
-    }
-
-    #[test]
-    fn test_padding_behavior() -> Result<(), Error> {
-        let weights = [4, 3, 2, 0, 1];
-        let table = DecodingTable::<64>::from_weights(&weights)?;
-        let data = [0x06];
-
-        let mut reader = ReverseBitReader::new(&data)?;
-        let decoder = Decoder::new(&table);
-
-        assert!(decoder.decode(&mut reader).is_err());
-
-        let sym = decoder.decode_padded(&mut reader);
-        assert_eq!(sym, 1);
-
         Ok(())
     }
 
@@ -478,14 +434,14 @@ mod tests {
             random_data in prop::collection::vec(any::<u8>(), 1..64)
         ) {
             if let Ok(table) = DecodingTable::<2048>::from_weights(&weights) {
-                let decoder = Decoder::new(&table);
                 if random_data.is_empty() || random_data[random_data.len()-1] == 0 { return Ok(()); }
 
-                if let Ok(mut reader) = rzstd_io::ReverseBitReader::new(&random_data) {
-                    for _ in 0..20 {
-                        if reader.bits_remaining() < table.max_bits as usize { break; }
-                        let _ = decoder.decode(&mut reader);
-                    }
+                let mut reader = rzstd_io::ReverseBitReader::new(&random_data)?;
+                let mut decoder = Decoder::new(&table, &mut reader);
+
+                for _ in 0..20 {
+                    if reader.bits_remaining() < table.max_bits as usize { break; }
+                    let _ = decoder.decode(&mut reader);
                 }
             }
         }

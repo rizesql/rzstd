@@ -9,10 +9,15 @@ publish = false
 repository.workspace = true
 description.workspace = true
 
-[lib]
-doctest = true
+[[bin]]
+name = "rzstd"
+path = "src/main.rs"
 
 [dependencies]
 rzstd_decompress.workspace = true
 
+clap.workspace = true
 miette = { workspace = true, features = ["fancy"] }
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true

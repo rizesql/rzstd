@@ -13,12 +13,11 @@ impl<'src> ReverseBitReader<'src> {
             return Err(Error::EmptyStream);
         }
 
-        let last = src[src.len() - 1];
+        let (&last, src) = src.split_last().ok_or(Error::EmptyStream)?;
         if last == 0 {
             return Err(Error::MissingSentinel);
         }
 
-        let src = &src[..src.len() - 1];
         let bit_count = (u8::BITS - last.leading_zeros() - 1) as u8;
 
         let buf = {
@@ -71,11 +70,11 @@ impl<'src> ReverseBitReader<'src> {
             self.refill();
         }
 
-        let to_read = self.bit_count.min(n_bits);
+        let to_read = n_bits.min(self.bit_count);
         let ret = self.peek(to_read);
         self.consume_unchecked(to_read);
 
-        ret
+        ret << (n_bits - to_read)
     }
 
     #[inline(always)]
@@ -85,9 +84,14 @@ impl<'src> ReverseBitReader<'src> {
 
     #[inline(always)]
     pub fn peek(&self, n_bits: u8) -> u64 {
+        if n_bits == 0 {
+            return 0;
+        }
+
         assert!(n_bits <= self.bit_count);
 
-        self.buf & ((1u64 << n_bits) - 1)
+        let shift = self.bit_count - n_bits;
+        (self.buf >> shift) & ((1u64 << n_bits) - 1)
     }
 
     #[inline(always)]
@@ -98,10 +102,11 @@ impl<'src> ReverseBitReader<'src> {
 
     #[inline(always)]
     fn consume_unchecked(&mut self, n_bits: u8) {
-        self.buf >>= n_bits;
         self.bit_count -= n_bits;
+        self.buf &= (1u64 << self.bit_count) - 1;
     }
 
+    #[inline(always)]
     #[cold]
     fn refill(&mut self) {
         assert!(self.bit_count < 64);
@@ -123,7 +128,7 @@ impl<'src> ReverseBitReader<'src> {
             let bytes = self.src[start..start + 8]
                 .try_into()
                 .expect("slice length is guaranteed to be 8");
-            u64::from_be_bytes(bytes)
+            u64::from_le_bytes(bytes)
         };
 
         self.buf = buf;
@@ -131,19 +136,62 @@ impl<'src> ReverseBitReader<'src> {
         self.src = &self.src[..start];
     }
 
+    #[inline(always)]
     #[cold]
     fn refill_cold(&mut self, count: usize) {
         let avail = self.src.len();
-        let to_read = count.min(avail);
 
-        let start = avail - to_read;
-        for (idx, &byte) in self.src[start..].iter().rev().enumerate() {
-            self.buf |= (byte as u64) << (self.bit_count + (idx as u8) * 8);
+        let start = avail - count.min(avail);
+        for &byte in self.src[start..].iter().rev() {
+            self.buf = (self.buf << 8) | (byte as u64);
+            self.bit_count += 8;
         }
 
-        self.bit_count += (to_read * 8) as u8;
         self.src = &self.src[..start];
     }
+
+    // #[cold]
+    // fn refill(&mut self) {
+    //     assert!(self.bit_count < 64);
+
+    //     let count = ((64 - self.bit_count) / 8) as usize;
+    //     if count == 0 {
+    //         return;
+    //     }
+
+    //     let to_read = count.min(self.src.len());
+    //     if to_read < 8 {
+    //         return self.refill_cold(to_read);
+    //     }
+
+    //     assert_eq!(self.bit_count, 0);
+
+    //     let start = self.src.len() - 8;
+    //     let buf = {
+    //         let bytes = self.src[start..start + 8]
+    //             .try_into()
+    //             .expect("slice length is guaranteed to be 8");
+    //         u64::from_be_bytes(bytes)
+    //     };
+
+    //     self.buf = buf;
+    //     self.bit_count = 64;
+    //     self.src = &self.src[..start];
+    // }
+
+    // #[cold]
+    // fn refill_cold(&mut self, count: usize) {
+    //     let avail = self.src.len();
+    //     let to_read = count.min(avail);
+
+    //     let start = avail - to_read;
+    //     for (idx, &byte) in self.src[start..].iter().rev().enumerate() {
+    //         self.buf |= (byte as u64) << (self.bit_count + (idx as u8) * 8);
+    //     }
+
+    //     self.bit_count += (to_read * 8) as u8;
+    //     self.src = &self.src[..start];
+    // }
 }
 
 #[cfg(test)]

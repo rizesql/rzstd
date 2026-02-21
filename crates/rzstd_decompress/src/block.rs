@@ -1,23 +1,33 @@
 use crate::{MAX_BLOCK_SIZE, context::Context, prelude::*};
-
 pub const HEADER_SIZE: usize = 3;
 
 impl<R: rzstd_io::Reader> Context<'_, R> {
     pub fn block(&mut self) -> Result<bool, Error> {
         let header = Header::read(&mut self.src)?;
+        tracing::debug!("decoding block (type={:?})", header.block_type());
+
         match header.block_type() {
             Type::Raw => {
                 let count = header.decompressed_size().ok_or(Error::MissingBlockSize)?;
+                tracing::debug!("block size={}", count);
                 self.window_buf.read_from(&mut self.src, count as usize)?;
             }
             Type::RLE => {
                 let count = header.decompressed_size().ok_or(Error::MissingBlockSize)?;
                 let byte = self.src.read_u8()?;
+                tracing::debug!("block size={}", count);
                 self.window_buf.push_rle(byte, count as usize);
             }
             Type::Compressed => {
-                self.literals_section()?;
-                self.execute_sequences(header.content_size())?;
+                let read = self.literals_section()? as usize;
+
+                tracing::debug!(
+                    "literals.len={:?}; literals={:?}",
+                    self.literals_buf[..self.literals_idx].len(),
+                    &self.literals_buf[..self.literals_idx]
+                );
+
+                self.sequence_section(header.content_size() as usize - read)?;
             }
         }
 
@@ -52,10 +62,6 @@ impl Header {
             return Err(Error::BlockSizeOutOfBounds(block_size));
         }
 
-        assert!(
-            block_size <= MAX_BLOCK_SIZE,
-            "Block size exceeds maximum allowed"
-        );
         Ok(Self {
             last_block,
             block_type,

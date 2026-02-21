@@ -1,0 +1,98 @@
+\section{Experiments}
+\label{sec:experiments}
+
+To evaluate the architectural decisions described in Section~\ref{sec:implementation}, the
+\textit{rzstd} implementation was assessed with respect to both performance and security properties.
+The experimental evaluation measures decompression throughput of the decoding pipeline and
+empirically examines the structural robustness against adversarial payloads.
+
+\subsection{Experimental Setup}
+
+All benchmarks were conducted on an Apple Silicon M1 processor (ARM64 architecture). The
+implementation was compiled using the stable Rust toolchain (version 1.92.0). Benchmarks
+were built with a custom profile configured as follows:
+
+\noindent
+\texttt{-C opt-level=3 -C lto=fat -C codegen-units=1 -C strip=none -C debug=true -C panic=abort
+-C target-cpu=native} This configuration enables full optimization while preserving debug symbols
+and ensuring consistent code generation across runs.
+
+Performance evaluation was conducted using the Silesia Compression Corpus \cite{Deorowicz2003},
+a standard dataset for compression benchmarking that provides a representative cross-section
+of real-world data types. The corpus reduces bias toward specific entropy distributions and
+enables comparison across varied content.
+
+Throughput measurements were collected using the \texttt{criterion} \cite{CriterionRs}
+statistical benchmarking framework. Criterion performs automated warm-up iterations prior to
+measurement to stabilize CPU frequency scaling, uses black-box wrappers to prevent dead-code
+elimination and reports statistically derived confidence intervals, thus reducing measurement
+noise introduced by frequency adjustments.
+
+\subsection{Throughput Analysis}
+\label{ssec:throughput-analysis}
+
+Decompression throughput was compared against the official C reference implementation (\texttt{libzstd})
+\cite{Collet2021} and a widely used pure-Rust implementation (\texttt{ruzstd})
+\cite{ruzstd}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\columnwidth]{assets/lines_throughput.pdf}
+  \caption{Average decompression throughput across the Silesia Corpus.}
+  \label{fig:throughput}
+\end{figure}
+
+As illustrated in Figure~\ref{fig:throughput} and quantified in Table~\ref{tab:throughput-summary}
+\textit{rzstd} achieves lower throughput than the optimized C implementation, reaching approximately
+\qty{640}{\mebi\byte\per\second} on the tested system, compared to \texttt{libzstd}'s peak of
+roughly \qty{1350}{\mebi\byte\per\second}.
+
+\begin{table}[H]
+  \centering
+  \caption{Throughput metrics across the Silesia Corpus.}
+  \label{tab:throughput-summary}
+  \renewcommand{\arraystretch}{1.2}
+  \resizebox{\columnwidth}{!}{%
+  \pgfplotstabletypeset[
+    col sep=comma,
+    every head row/.style={ before row=\toprule, after row=\midrule },
+    every last row/.style={ after row=\bottomrule },
+    columns={file, fileBytes, libzstd, ruzstd, rzstd},
+    columns/file/.style={ string type, column type=l, column name=\textbf{File} },
+    columns/fileBytes/.style={ string type, column type={S[table-format=8.0, group-separator={,}]}, column name={\textbf{Size [\unit{\byte}]}} },
+    columns/libzstd/.style={ string type, column type={S[table-format=4.2]}, column name={\textbf{\texttt{libzstd} [\unit{\mebi\byte\per\second}]}} },
+    columns/ruzstd/.style={ string type, column type={S[table-format=4.2]}, column name={\textbf{\texttt{ruzstd} [\unit{\mebi\byte\per\second}]}} },
+    columns/rzstd/.style={ string type, column type={S[table-format=4.2]}, column name={\textbf{\textit{rzstd} [\unit{\mebi\byte\per\second}]}} }
+  ]{assets/throughput.csv}
+  }
+\end{table}
+
+The performance gap is consistent with the implementation strategy and matureness. The reference
+C implementation extensively uses architecture-specific assembly and SIMD operations whereas
+\textit{rzstd} exclusively relies on portable Rust code.
+
+When compared to \texttt{ruzstd}, \textit{rzstd} exhibits similar scaling behavior across the
+evaluated input sizes (Figure~\ref{fig:latency}). Although minor constant-factor
+differences are visible, the overall throughput trends follow similar trajectories. This
+indicates that both Rust implementations are primarily influenced by similar architectural
+constraints rather than fundamental algorithmic differences.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\columnwidth]{assets/lines.pdf}
+  \caption{Average execution latency scaling relative to input size.}
+  \label{fig:latency}
+\end{figure}
+
+The additional overhead observed in \textit{rzstd} is likely associated with a combination
+of factors, including the absence of architecture specific optimizations (e.g., SIMD),
+conservative bounds enforcement, and the current level of implementation maturity. Unlike
+the reference C implementation, \textit{rzstd} has not yet undergone extensive tuning and
+micro-optimization, which may contribute to performance differences.
+
+For transparency, the \texttt{mozilla} file from the Silesia Corpus is excluded from the throughput
+analysis. During evaluation, \textit{rzstd} completed decoding but produced a checksum
+mismatch (XXH64 validation failure). This indicates a functionality defect in the reconstruction
+logic rather than a parsing or memory safety issue. Importantly, the decoder terminated gracefully
+without panics or out-of-bounds memory accesses, preserving its memory safety guarantees
+despite producing incorrect output.

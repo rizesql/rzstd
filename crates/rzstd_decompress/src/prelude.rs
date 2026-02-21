@@ -22,8 +22,4 @@ impl TwoBitFlag {
             _ => unreachable!("Invalid value for TwoBitFlag"),
         }
     }
-
-    pub const fn as_u8(self) -> u8 {
-        self as u8
-    }
 }

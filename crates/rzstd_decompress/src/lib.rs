@@ -12,6 +12,7 @@ mod sequences_section;
 mod window;
 
 pub use decoder::Decoder;
+pub use errors::Error;
 
 pub const MAGIC_NUM: u32 = 0xFD2F_B528;
 
@@ -53,7 +54,7 @@ pub const OF_DIST: DefaultDistribution = DefaultDistribution {
 };
 const_assert!(OF_DIST.predefined_table().len() == 29);
 
-struct DefaultDistribution {
+pub struct DefaultDistribution {
     accuracy_log: usize,
     predefined_accuracy_log: usize,
     predefined_table: &'static [i16],
@@ -61,7 +62,7 @@ struct DefaultDistribution {
 
 impl DefaultDistribution {
     pub const fn accuracy_log(&self) -> usize {
-        self.accuracy_log
+        self.predefined_accuracy_log
     }
 
     pub const fn table_size(&self) -> usize {

@@ -45,11 +45,8 @@ impl Header {
             dictionary_id,
             content_size,
         };
-        if header.descriptor.is_single_segment() {
-            assert!(
-                header.content_size.is_some(),
-                "Single segment implies Content Size is present"
-            )
+        if header.descriptor.is_single_segment() && header.content_size.is_none() {
+            return Err(Error::MissingFrameContentSize);
         }
 
         Ok(header)
@@ -70,10 +67,6 @@ impl Header {
     /// Minimum memory buffer size to to decode compressed data.
     pub fn window_size(&self) -> Result<u64, Error> {
         if self.descriptor.is_single_segment() {
-            assert!(
-                self.content_size.is_some(),
-                "Single Segment implies Content Size is present"
-            );
             return Ok(self.content_size().unwrap());
         }
 

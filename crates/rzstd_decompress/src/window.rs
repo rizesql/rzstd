@@ -55,6 +55,8 @@ impl<'b> Window<'b> {
 
         let target = &mut self.buf[self.index..self.index + len];
         src.read_exact(target)?;
+        tracing::debug!("out.len={:?}; out={:?}", target.len(), target);
+
         self.index += len;
         Ok(())
     }
@@ -76,6 +78,12 @@ impl<'b> Window<'b> {
         }
 
         self.buf[self.index..self.index + count].fill(byte);
+        tracing::debug!(
+            "out.len={:?}; out={:?}",
+            self.buf[self.index..self.index + count].len(),
+            &self.buf[self.index..self.index + count]
+        );
+
         self.index += count
     }
 
@@ -83,21 +91,32 @@ impl<'b> Window<'b> {
     pub fn copy_within(&mut self, offset: usize, n_bytes: usize) -> Result<(), Error> {
         debug_assert!(n_bytes <= MAX_BLOCK_SIZE as usize);
 
+        if self.index + n_bytes > self.buf.len() {
+            self.shift();
+        }
+
         let available = self.index.min(self.size);
         if offset == 0 || offset > available {
             return Err(Error::CopiedSizeOutOfBounds);
         }
 
-        if self.index + n_bytes > self.buf.len() {
-            self.shift();
-        }
-
         let start = self.index - offset;
         if offset >= n_bytes {
             self.buf.copy_within(start..start + n_bytes, self.index);
+        } else if offset == 1 {
+            let val = self.buf[start];
+            self.buf[self.index..self.index + n_bytes].fill(val);
         } else {
-            for idx in 0..n_bytes {
-                self.buf[self.index + idx] = self.buf[start + idx];
+            let initial_copy = std::cmp::min(offset, n_bytes);
+            self.buf
+                .copy_within(start..start + initial_copy, self.index);
+            let mut copied = initial_copy;
+
+            while copied < n_bytes {
+                let copy_len = std::cmp::min(copied, n_bytes - copied);
+                self.buf
+                    .copy_within(self.index..self.index + copy_len, self.index + copied);
+                copied += copy_len;
             }
         }
 

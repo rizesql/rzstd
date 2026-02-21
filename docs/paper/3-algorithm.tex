@@ -1,0 +1,157 @@
+\section{Algorithm}
+\label{sec:algorithm}
+
+Zstandard is a lossless, block-oriented compression format that functions as a signal
+reconstruction pipeline. The compressed bitstream can be interpreted as a representation of
+a discrete-time byte signal, reconstructed deterministically during decoding. The format leverages
+LZ77 dictionary matching to compress data by referencing previously reconstructed bytes from
+a sliding window. From a signal processing perspective, this mechanism resembles a nonlinear
+coding scheme in which previous samples are reused through a variable-delay feedback path.
+
+While this architecture accelerates decompression by relying primarily on memory transfers rather
+than arithmetic logic, it introduces important structural constraints: overlapping LZ77 matches
+rule out the use of naive memory copy operations, requiring controlled reconstruction
+semantics to preserve correctness and data integrity.
+
+\subsection{Block Architecture}
+
+A Zstandard archive is structured as a bitstream consisting of one or more concatenated frames,
+independent units that share metadata across their constituent blocks throughout the
+decompression process. While frames can be decompressed independently, the blocks within a
+frame must be decompressed serially, in the order of appearance, to maintain the look-back
+window integrity. Each frame might enforce specific bounds regarding \texttt{Window\_Size},
+the maximum look-back limit for the LZ77 sliding window, which under stricter profiles
+such as \textit{RFC 9659} \cite{Nidhi2024} must not exceed $\qty{8}{\mega\byte}$.
+Enforcing strict bounds on \texttt{Window\_Size} before allocating the output buffer is an important
+measure taken to prevent resource exhaustion attacks, controlled via maliciously crafted
+frame headers.
+
+Within a frame, the bitstream is serialized into blocks, strictly capped at
+$\qty{128}{\kilo\byte}$ to bound the decoder's required memory per processing cycle. This segmentation
+implies piecewise statistical stationarity: entropy models are reconstructed per block, allowing
+adaptation to local changes while maintaining bounded complexity.
+
+Each block begins with a 3-byte header, containing metadata that dictates the block's
+decompressed size and the required reconstruction strategy: \textit{Raw}, \textit{RLE}, or \textit{Compressed}.
+\textit{Raw} blocks represent uncompressed signal segments, requiring a direct memory transfer
+to the output buffer. \textit{RLE} (Run-Length Encoding) blocks instruct the decompressor to
+repeat a single byte across a specified length. Finally, \textit{Compressed} blocks
+consist of two independent coded streams: literals and sequences, which require further
+stateful entropy decoding.
+
+\subsection{Literals Section}
+
+Literals represent the residual signal that could not be compressed by LZ77, but might be
+compressed using Huffman coding. The literals section begins with a metadata header specifying
+the regenerated size (literals buffer size), strictly bounded by the maximum block size, and
+the decoding strategy: \textit{Raw}, \textit{RLE}, \textit{Compressed}, or \textit{Treeless}.
+Similar to the block-level mechanics, \textit{Raw} and \textit{RLE} literals dictate direct
+memory transfers and byte-replication respectively.
+
+For highly compressible residual signals, the \textit{Compressed} and \textit{Treeless}
+strategies employ Huffman coding. To maximize decompression throughput via instruction-level
+parallelism the encoded literals may be multiplexed into a single continuous bitstream or four
+independent bitstreams. The latter architecture enables superscalar processors to decode
+four symbols concurrently by writing to disjoint segments of the literals buffer.
+
+Beyond the literal bitstreams, the Huffman decoding tables must be decoded. A \textit{Treeless}
+section minimizes information redundancy by inheriting the Huffman tree from a preceding block.
+Conversely, a \textit{Compressed} section encapsulates the Huffman tree description
+directly within the bitstream, which can be either transmitted directly as a sequence of normalized
+frequency counts, or as a compressed signal, decoded using two interleaved FSE decoders sharing
+the same alphabet.
+
+From a validation standpoint, both strategies require strict enforcement of structural
+invariants. The decoder must ensure that the sum of the decoded normalized frequencies strictly
+equals the allocated table size, which is a power of two, denoted as $2^{\mathtt{Table\_Log}}$.
+If this constraint is violated, the provided weights array is oversubscribed and thus the sum
+exceeds this boundary, resulting in invalid prefix codes.
+
+\subsection{Sequences Section}
+
+While the literals section encodes the residual signal, the sequences section dictates the
+operating logic of the LZ77 back-reference mechanism. A block reconstruction requires a succession
+of sequences, representing tuples of three distinct parameters: \textit{literal\_length}, the
+number of bytes to copy from the literals buffer, \textit{match\_length}, the number of
+bytes to copy from the sliding window buffer, and \textit{offset}, the distance from the current
+position to the start of the match. Because these parameters correspond to fundamentally
+different reconstruction operations, their statistical distributions vary significantly,
+thus necessitating the use of three independent entropy alphabets.
+
+To process these alphabets, Zstandard employs Finite State Entropy, an architectural
+choice over Huffman coding driven by the statistical prevalence of dominant symbols within
+sequence metadata. In many LZ77 outputs, specific sequence values occur with a probability
+exceeding $0.5$, which, according to Shannon's source coding theorem, can be represented optimally
+using fractional bit lengths. Given these data properties, Huffman coding proves limited,
+as it encodes symbols using integer bit lengths, thus introducing redundancy relative to the
+actual information content. FSE bypasses this limitation by absorbing symbol probabilities
+into a finite-state machine, enabling the representation of dominant symbols using fractional
+numbers of bits.
+
+The sequences section begins with a unified metadata header containing the number of sequences
+to decode and the compression mode for each alphabet: \textit{Predefined}, \textit{RLE},
+\textit{FSE\_Compressed}, or \textit{Repeat}. The \textit{Predefined} mode instructs the decoder
+to use a static table provided by the specification. An \textit{RLE} compressed table consists
+of a single symbol value to be used for all sequences. \textit{FSE\_Compressed} mode instructs
+the decoder to read an FSE decoding table from the bitstream, and finally, the \textit{Repeat}
+mode dictates the reuse of an existing table from a previously decompressed block should
+be reused.
+
+Unlike the parallel stream architecture used in the literals section, the encoded sequences
+are multiplexed into a single continuous bitstream. During decoding, this bitstream is consumed
+in reverse, while the three FSE decoders for \texttt{literal\_length}, \texttt{match\_length},
+and \texttt{offset} advance forward in an interleaved sequence. Because each automaton
+dynamically computes the number of bits to consume from the stream based on its current
+discrete state, the decoding loop is strictly constrained by Read-After-Write (RAW) data dependencies,
+limiting instruction-level parallelism.
+
+During table construction, normalized frequency counts must sum exactly to $2^{\mathtt{Accuracy\_Log}}$
+and remain within specification-defined bounds. These constraints ensure that all state
+transitions remain within the bounded finite-state interval. Finally, the table must be
+populated using a step-rate spreading algorithm to ensure uniform distribution of symbols
+across the array. If any of these invariants are violated, the resulting decoding table is
+invalid, leading to immediate state desynchronization and data corruption during the decoding
+phase.
+
+\subsection{Sequence Execution}
+\label{ssec:sequence-execution}
+
+The final phase of decompression reconstructs the original signal by applying the parsed
+sequence tuples to the output buffer, which functions as a historical sliding window dictionary.
+
+For each sequence \textit{k}, defined as the tuple ($\mathtt{literal\_length_{k}}$, $\mathtt{match\_length_{k}}$,
+$\mathtt{offset_{k}}$), the decoder executes a two-phase memory operation. First, it
+copies $\mathtt{literal\_length_{k}}$ bytes from the parsed literals into the output
+buffer. Second, it references $\mathtt{match\_length_{k}}$ bytes from the previous decoded
+data, located $\mathtt{offset_{k}}$ bytes before the current position.
+
+Fundamentally, the match copy operation is an auto-regressive process. When $\mathtt{match\_length_{k}}
+\leq \mathtt{offset_{k}}$, it is a trivial direct copy. However, when
+$\mathtt{match\_length_{k}}> \mathtt{offset_{k}}$, the read and write sections overlap,
+creating a recursive feedback loop. Let $\mathit{out}[n]$ represent the byte at index $n$ in
+the output buffer. Starting at the current write position $n_{0}$, the reconstructed signal
+satisfies
+
+\begin{equation}
+  \mathit{out}[n] = \mathit{out}[n - \mathtt{offset_{k}}]
+\end{equation}
+for $n_{0}\leq n < n_{0}+ \mathtt{match\_length_{k}}$. This generates a periodic signal with
+a fundamental period of $\mathtt{offset_{k}}$ bytes, allowing compact representation of
+locally repeating data patterns.
+
+Because the compressed bitstream is inherently an untrusted input, translating this signal reconstruction
+into in-memory operations requires enforcing strict spatial invariants. Before appending
+to the output buffer, the decompressor must ensure that adding $\mathtt{literal\_length}+ \mathtt{match\_length}$
+bytes to the output buffer would not overflow its allocated capacity, which would
+otherwise result in memory corruption. Similarly, the resolved $\mathtt{offset}$ must be
+validated against the available capacity of the sliding window. An out-of-bounds read permits
+arbitrary memory reads, potentially leading to denial of service via segmentation faults.
+
+Finally, the recursive nature of the periodic signal generation introduces a serious safety
+hazard. Naively applying simple block memory copies (semantically equivalent to C's \texttt{memcpy})
+when $\mathtt{match\_length}> \mathtt{offset}$ constitutes Undefined Behavior due to overlapping
+source and destination buffers. A safe implementation must explicitly handle this
+recursive generation, either via byte-by-byte copying or by leveraging operations semantically
+equivalent to \texttt{memmove}. Moreover, an adversarial payload specifying an
+$\mathtt{offset}= 1$ and a massive $\mathtt{match\_length}$ weaponizes the auto-regressive
+loop to exhaust system memory, acting as a decompression bomb.
