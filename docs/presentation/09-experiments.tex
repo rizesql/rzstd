@@ -1,0 +1,17 @@
+\begin{frame}{Evaluarea Performanței (Silesia Corpus)}
+  \begin{itemize}
+    \item \textbf{Mediu de testare:} Apple Silicon M1 (ARM64), benchmark-uri statistice extrase
+      cu framework-ul \texttt{criterion.rs}.
+
+    \item \textbf{Comparație throughput:} \texttt{libzstd} (referința nativă în C),
+      \texttt{ruzstd} (implementare comunitară Rust) și \textbf{\texttt{rzstd}} (implementarea
+      curentă).
+  \end{itemize}
+
+  \vspace{0.2cm}
+  \begin{center}
+    \includegraphics[width=0.95\linewidth, height=0.55\textheight, keepaspectratio]{
+      assets/lines_throughput.pdf
+    }
+  \end{center}
+\end{frame}

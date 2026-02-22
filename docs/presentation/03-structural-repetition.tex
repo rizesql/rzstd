@@ -1,0 +1,73 @@
+\begin{frame}{Reconstrucția Semnalului în Zstandard}
+  \begin{itemize}
+    \item Zstandard utilizează un proces cauzal, cu memorie finită (look-back windows).
+
+    \item Semnalul este modelat in două componente:
+      \begin{itemize}
+        \item \textbf{Literals}: Simboluri emise direct.
+
+        \item \textbf{Sequences}: Referințe la simboluri deja construite (\texttt{literal\_length,
+          match\_length, offset})
+      \end{itemize}
+  \end{itemize}
+
+  \begin{block}{Observație}
+    Modelul este echivalent cu o schemă LZ77
+  \end{block}
+
+  \begin{center}
+    \resizebox{0.75\linewidth}{!}{%
+    \begin{tikzpicture}[
+      node distance=0pt,
+      cell/.style={draw, thick, minimum width=0.8cm, minimum height=0.8cm, align=center, font=\sffamily\Large},
+      literal/.style={fill=blue!10, draw=blue!80},
+      sequence/.style={fill=green!10, draw=green!70!black}
+    ]
+      % Array cells
+      \node[cell, literal] (N1) {A};
+      \node[cell, literal, right=of N1] (N2) {B};
+      \node[cell, literal, right=of N2] (N3) {C};
+      \node[cell, literal, right=of N3] (N4) {D};
+
+      \node[cell, sequence, right=of N4] (N5) {A};
+      \node[cell, sequence, right=of N5] (N6) {B};
+      \node[cell, sequence, right=of N6] (N7) {C};
+      \node[cell, sequence, right=of N7] (N8) {D};
+
+      \node[cell, literal, right=of N8] (N9) {E};
+      \node[cell, literal, right=of N9] (N10) {F};
+
+      % Top Braces (Step Groupings)
+      \draw[thick, blue!80, decorate, decoration={brace, amplitude=5pt}]
+        (N1.north west) -- (N4.north east)
+        node[midway, above=8pt, font=\sffamily\small] {\textbf{Literals}};
+
+      \draw[thick, green!70!black, decorate, decoration={brace, amplitude=5pt}]
+        (N5.north west) -- (N8.north east)
+        node[midway, above=8pt, font=\sffamily\small] {\textbf{Sequence}};
+
+      \draw[thick, blue!80, decorate, decoration={brace, amplitude=5pt}]
+        (N9.north west) -- (N10.north east)
+        node[midway, above=8pt, font=\sffamily\small] {\textbf{Literals}};
+
+      % Calculate the horizontal centers of the blocks for perfect arrow alignment
+      \path (N1.south) -- (N4.south) coordinate[midway] (LitCenter);
+      \path (N5.south) -- (N8.south) coordinate[midway] (SeqCenter);
+
+      % Backward Copy Arrow
+      \draw[->, >=stealth, thick, green!70!black]
+        (SeqCenter) --
+        ++(0,-0.8) -|
+        node[pos=0.25, below, font=\sffamily\small]
+          {\textbf{Feedback:} \textit{offset} = 4, \textit{match\_length} = 4}
+        (LitCenter);
+
+      % Optional dashed lines
+      \draw[green!70!black, dashed] (N5.south west) -- ++(0,-0.8);
+      \draw[green!70!black, dashed] (N8.south east) -- ++(0,-0.8);
+      \draw[blue!80, dashed] (N1.south west) -- ++(0,-0.8);
+      \draw[blue!80, dashed] (N4.south east) -- ++(0,-0.8);
+    \end{tikzpicture}%
+    }
+  \end{center}
+\end{frame}

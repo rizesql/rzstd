@@ -18,6 +18,7 @@ let
       beamer
       minted
       pgfplots
+      tikz
       ;
   };
 in

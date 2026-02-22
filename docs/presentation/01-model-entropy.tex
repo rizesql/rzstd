@@ -1,0 +1,56 @@
+\begin{frame}{Modelarea și Codificarea Entropiei}
+  \begin{itemize}
+    \item \textbf{Compresie} = minimizarea reprezentării în memorie a unei surse binare
+      prin modelare și codificarea entropiei
+
+      \vspace{0.3cm}
+      \begin{center}
+        \resizebox{0.95\linewidth}{!}{%
+        \begin{tikzpicture}[
+          node distance=1.2cm,
+          font=\sffamily,
+          block/.style={draw=blue!80, fill=blue!10, rectangle, minimum height=1cm, minimum width=2.8cm, align=center, rounded corners=2pt, thick},
+          signal/.style={draw=green!70!black, fill=green!10},
+          bitstream/.style={draw=orange!80, fill=orange!10},
+          arrow/.style={thick,->,>=stealth}
+        ]
+          \node[block, signal] (sig) {\textbf{Signal}};
+          \node[block, right=of sig] (mod) {Model};
+          \node[block, right=of mod] (enc) {Entropy\\Encoding};
+          \node[block, bitstream, right=of enc] (bit) {\textbf{Bitstream}};
+
+          \draw[arrow] (sig) -- (mod);
+          \draw[arrow] (mod) -- (enc);
+          \draw[arrow] (enc) -- (bit);
+        \end{tikzpicture}%
+        }
+      \end{center}
+      \vspace{0.3cm}
+
+    \item \textbf{Decompresie} = reconstrucția semnalului inițial prin decodarea entropiei
+      și interpretarea modelului
+
+      \vspace{0.3cm}
+      \begin{center}
+        \resizebox{0.95\linewidth}{!}{%
+        \begin{tikzpicture}[
+          node distance=1.2cm,
+          font=\sffamily,
+          block/.style={draw=blue!80, fill=blue!10, rectangle, minimum height=1cm, minimum width=2.8cm, align=center, rounded corners=2pt, thick},
+          signal/.style={draw=green!70!black, fill=green!10},
+          bitstream/.style={draw=orange!80, fill=orange!10},
+          arrow/.style={thick,->,>=stealth}
+        ]
+          \node[block, bitstream] (bit) {\textbf{Bitstream}};
+          \node[block, right=of bit] (dec) {Entropy\\Decoding};
+          \node[block, right=of dec] (mod) {Model\\Interpretation};
+          \node[block, signal, right=of mod] (sig) {\textbf{Signal}};
+
+          \draw[arrow] (bit) -- (dec);
+          \draw[arrow] (dec) -- (mod);
+          \draw[arrow] (mod) -- (sig);
+        \end{tikzpicture}%
+        }
+      \end{center}
+  \end{itemize}
+\end{frame}

@@ -1,0 +1,99 @@
+\begin{frame}{Sequences Section}
+  \begin{itemize}
+    \item Secvențele modelează repetiția structurală din semnal.
+
+    \item Fiecare secvență este un triplet:
+      \[
+        (\texttt{literal\_length},\ \texttt{match\_length},\ \texttt{offset})
+      \]
+
+    \item Fiecare componentă este decodificată printr-un decoder FSE separat.
+
+    \item Prin trei automate finite, care avansează intercalat, este decodificată structura
+      reconstrucției.
+  \end{itemize}
+
+  \vspace{0.4cm}
+  \begin{center}
+    \resizebox{0.95\linewidth}{!}{%
+    \begin{tikzpicture}[
+      font=\sffamily,
+      thick,
+      >=stealth,
+      bitstream/.style={draw=orange!80!black, fill=orange!10, minimum height=3.8cm, minimum width=1.2cm, align=center, rounded corners=2pt},
+      fse/.style={draw=purple!80!black, fill=purple!10, minimum height=0.7cm, minimum width=3.4cm, align=center, rounded corners=2pt},
+      triplet/.style={draw=green!70!black, fill=green!10, minimum height=0.7cm, minimum width=3.2cm, align=center, rounded corners=2pt}
+    ]
+      % 1. Bitstream Source
+      \node[bitstream] (bit) at (0, 0) {\rotatebox{90}{\textbf{Bitstream}}};
+
+      % 2. Three FSE Automata (Mutate mai la dreapta pentru a face loc)
+      \node[fse] (ll) at (5.2, 1.3) {FSE: \texttt{literal\_length}};
+      \node[fse] (ml) at (5.2, 0) {FSE: \texttt{match\_length}};
+      \node[fse] (of) at (5.2, -1.3) {FSE: \texttt{offset}};
+
+      % Grouping for Automata
+      \node[
+        draw=purple!80!black,
+        dashed,
+        inner sep=8pt,
+        rounded corners=2pt,
+        fit=(ll)(ml)(of)
+      ] (fse_group) {};
+      \node[above=0.15cm of fse_group.north, font=\sffamily\small, text=purple!80!black]
+        {\textbf{Automate Finite Intercalate}};
+
+      % 3. Output Triplet Components (Mutate proporțional mai la dreapta)
+      \node[triplet] (t_ll) at (10.6, 1.3) {\texttt{literal\_length}};
+      \node[triplet] (t_ml) at (10.6, 0) {\texttt{match\_length}};
+      \node[triplet] (t_of) at (10.6, -1.3) {\texttt{offset}};
+
+      % Grouping for Output
+      \node[
+        draw=green!70!black,
+        dashed,
+        inner sep=8pt,
+        rounded corners=2pt,
+        fit=(t_ll)(t_ml)(t_of)
+      ] (seq_group) {};
+      \node[
+        right=0.15cm of seq_group.east,
+        font=\sffamily\small,
+        text=green!70!black,
+        rotate=-90,
+        anchor=north
+      ] {\textbf{Triplet Secvență}};
+
+      % --- Routing ---
+
+      % Arrows from bitstream
+      \draw[->, orange!80!black] (bit.east |- ll.west) -- (ll.west);
+
+      % Săgeata centrală cu textul pus pe două rânduri (align=center)
+      \draw[->, orange!80!black]
+        (bit.east |- ml.west) -- (ml.west)
+        node[
+            midway,
+            fill=white,
+            inner sep=2pt,
+            font=\sffamily\scriptsize,
+            text=orange!80!black,
+            align=center
+          ]
+          {Consum\\[-0.5ex]Intercalat};
+
+      \draw[->, orange!80!black] (bit.east |- of.west) -- (of.west);
+
+      % Interleaved cyclic state arrows
+      \draw[->, purple!80!black, dotted, bend right=45] (ll.west) to (ml.west);
+      \draw[->, purple!80!black, dotted, bend right=45] (ml.west) to (of.west);
+      \draw[->, purple!80!black, dotted, bend right=60] (of.east) to (ll.east);
+
+      % Arrows to triplet outputs
+      \draw[->, purple!80!black] (ll.east) -- (t_ll.west);
+      \draw[->, purple!80!black] (ml.east) -- (t_ml.west);
+      \draw[->, purple!80!black] (of.east) -- (t_of.west);
+    \end{tikzpicture}%
+    }
+  \end{center}
+\end{frame}

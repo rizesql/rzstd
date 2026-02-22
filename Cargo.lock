@@ -884,7 +884,6 @@ dependencies = [
  "rzstd_io",
  "thiserror",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

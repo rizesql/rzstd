@@ -1,0 +1,52 @@
+\begin{frame}{Generarea Semnalelor Periodice}
+  \small Pentru $\mathtt{offset}< \mathtt{match\_length}$, regiunea din fereastra de look-back
+  din care se copiază și fereastra unde se scrie se suprapun, deci o operație de copiere directă
+  conduce la acces invalid de memorie.
+
+  \textbf{Soluția rzstd: Generare Exponențială ($\mathcal{O}(\log N)$ copieri)} \\ În loc
+  de copiere unitate cu unitate, implementarea dublează iterativ dimensiunea semnalului generat,
+  folosind porțiunea deja validată ca bază pentru copia următoare.
+
+  \vspace{0.2cm}
+  \begin{center}
+    \resizebox{0.9\linewidth}{!}{%
+    \begin{tikzpicture}[
+      font=\sffamily,
+      thick,
+      >=stealth,
+      seg/.style={draw=blue!80!black, fill=blue!10, minimum height=0.6cm, align=center, rounded corners=2pt, font=\large},
+      new/.style={draw=green!70!black, fill=green!10, minimum height=0.6cm, align=center, rounded corners=2pt, font=\large},
+      rem/.style={draw=orange!80!black, fill=orange!10, minimum height=0.6cm, align=center, rounded corners=2pt, dashed, font=\large}
+    ]
+      % Pasul 0
+      \node[anchor=east] at (-0.5, 0) {\textbf{Pasul 0:}};
+      \node[seg, minimum width=2cm] (p0) at (1, 0) {Perioada ($P$)};
+      \node[right=0.2cm of p0, font=\small, text=gray!80!black]
+        {Baza inițială (dimensiune = \textit{offset})};
+
+      % Pasul 1
+      \node[anchor=east] at (-0.5, -1.1) {\textbf{Pasul 1:}};
+      \node[seg, minimum width=2cm] (p1a) at (1, -1.1) {$P$};
+      \node[new, minimum width=2cm] (p1b) at (3.2, -1.1) {$P$};
+
+      % Pasul 2
+      \node[anchor=east] at (-0.5, -2.2) {\textbf{Pasul 2:}};
+      \node[seg, minimum width=4.2cm] (p2a) at (2.1, -2.2) {$P \quad | \quad P$};
+      \node[new, minimum width=4.2cm] (p2b) at (6.5, -2.2) {$P \quad | \quad P$};
+
+      % Pasul 3 (Final)
+      \node[anchor=east] at (-0.5, -3.3) {\textbf{Pasul k:}};
+      \node[seg, minimum width=8.6cm]
+        (p3a)
+        at
+        (4.3, -3.3)
+        {$P \quad | \quad P \quad | \quad P \quad | \quad P$};
+      \node[rem, minimum width=2.5cm] (p3b) at (10.05, -3.3) {Rest};
+      \draw[->, blue!80!black]
+        (p3a.south) to[bend right=12]
+        node[below=2pt, font=\small] {\textbf{Copiere Trunchiată}}
+        (p3b.south);
+    \end{tikzpicture}%
+    }
+  \end{center}
+\end{frame}

@@ -1,0 +1,193 @@
+\begin{frame}{Modelul Zstandard}
+  \begin{columns}[T]
+    \begin{column}{0.45\textwidth}
+      \textbf{Frame}
+      \begin{itemize}
+        \item Header (metadata)
+
+        \item Blocuri (\textit{literals} + \textit{sequences})
+
+        \item frame-urile sunt decompresate independent
+      \end{itemize}
+
+      \textbf{Bloc}
+      \begin{itemize}
+        \item Header (metadata)
+
+        \item \textit{literals section} + \textit{sequences section}
+
+        \item blocurile sunt decompresate serial
+      \end{itemize}
+    \end{column}
+
+    \begin{column}{0.5\textwidth}
+      \resizebox{\textwidth}{!}{%
+      \begin{tikzpicture}[
+        node distance=0pt,
+        font=\sffamily,
+        thick,
+        % Define styles for our elements
+        frameBox/.style={draw=blue!60, fill=blue!5, rounded corners=2pt, inner sep=10pt},
+        frameHeader/.style={draw=blue!80, fill=blue!20, minimum height=1cm, align=center, text=black, outer sep=0pt},
+        blockHeader/.style={draw=green!70!black, fill=green!20, minimum height=0.8cm, align=center, outer sep=0pt},
+        subSection/.style={draw=orange!80, fill=orange!10, minimum height=2.5cm, align=center, outer sep=0pt, inner sep=2pt}
+      ]
+        % ==============================
+        % FRAME 1
+        % ==============================
+        \node[frameHeader, minimum width=14cm] (f1_hdr) {\textbf{Frame 1 Header}};
+
+        % --- Block 1 ---
+        % Set to 4.0cm width, with 15pt padding from the left edge
+        \node[
+          blockHeader,
+          minimum width=4.0cm,
+          below right=15pt and 15pt of f1_hdr.south west,
+          anchor=north west
+        ] (b1_hdr) {\textbf{Block 1 Header}};
+
+        % Exactly half the header width (2.0cm)
+        \node[
+          subSection,
+          minimum width=2.0cm,
+          text width=1.8cm,
+          below=of b1_hdr.south west,
+          anchor=north west
+        ] (b1_lit) {\small Literals};
+
+        \node[
+          subSection,
+          minimum width=2.0cm,
+          text width=1.8cm,
+          below=of b1_hdr.south east,
+          anchor=north east
+        ] (b1_seq) {\small Sequences};
+
+        \node[
+          draw=green!70!black,
+          fit=(b1_hdr)(b1_lit)(b1_seq),
+          inner sep=0pt,
+          outer sep=0pt
+        ] (block1) {};
+
+        % --- Block 2 ---
+        % Also 4.0cm width
+        \node[
+          blockHeader,
+          minimum width=4.0cm,
+          right=15pt of block1.north east,
+          anchor=north west
+        ] (b2_hdr) {\textbf{Block 2 Header}};
+
+        \node[
+          subSection,
+          minimum width=2.0cm,
+          text width=1.8cm,
+          below=of b2_hdr.south west,
+          anchor=north west
+        ] (b2_lit) {\small Literals};
+
+        \node[
+          subSection,
+          minimum width=2.0cm,
+          text width=1.8cm,
+          below=of b2_hdr.south east,
+          anchor=north east
+        ] (b2_seq) {\small Sequences};
+
+        \node[
+          draw=green!70!black,
+          fit=(b2_hdr)(b2_lit)(b2_seq),
+          inner sep=0pt,
+          outer sep=0pt
+        ] (block2) {};
+
+        % --- Block N ---
+        % Also 4.0cm width, anchored with 15pt padding from the right edge
+        \node[
+          blockHeader,
+          minimum width=4.0cm,
+          below left=15pt and 15pt of f1_hdr.south east,
+          anchor=north east
+        ] (bn_hdr) {\textbf{Block $N$ Header}};
+
+        \node[
+          subSection,
+          minimum width=2.0cm,
+          text width=1.8cm,
+          below=of bn_hdr.south west,
+          anchor=north west
+        ] (bn_lit) {\small Literals};
+
+        \node[
+          subSection,
+          minimum width=2.0cm,
+          text width=1.8cm,
+          below=of bn_hdr.south east,
+          anchor=north east
+        ] (bn_seq) {\small Sequences};
+
+        \node[
+          draw=green!70!black,
+          fit=(bn_hdr)(bn_lit)(bn_seq),
+          inner sep=0pt,
+          outer sep=0pt
+        ] (blockN) {};
+
+        % Horizontal Ellipsis
+        \path (block2.east) -- (blockN.west) node[midway, scale=2.5, text=black] {\dots};
+
+        % Wrap Frame 1
+        \begin{scope}[on background layer]
+          \node[frameBox, fit=(f1_hdr)(block1)(block2)(blockN)] (frame1) {};
+        \end{scope}
+
+        % ==============================
+        % FRAME 2
+        % ==============================
+        \node[frameHeader, minimum width=14cm, below=25pt of frame1]
+          (f2_hdr)
+          {\textbf{Frame 2 Header}};
+        \node[
+          draw=green!70!black,
+          fill=green!5,
+          minimum width=13.5cm,
+          minimum height=2cm,
+          below=15pt of f2_hdr,
+          align=center,
+          text=gray,
+          outer sep=0pt
+        ] (f2_data) {Blocks \dots};
+
+        \begin{scope}[on background layer]
+          \node[frameBox, fit=(f2_hdr)(f2_data)] (frame2) {};
+        \end{scope}
+
+        % ==============================
+        % FRAME N (Vertical Ellipsis)
+        % ==============================
+        \node[below=25pt of frame2.south, scale=3, text=black] (vdots) {\vdots};
+
+        \node[frameHeader, minimum width=14cm, below=25pt of vdots]
+          (fn_hdr)
+          {\textbf{Frame $N$ Header}};
+
+        \node[
+          draw=green!70!black,
+          fill=green!5,
+          minimum width=13.5cm,
+          minimum height=2cm,
+          below=15pt of fn_hdr,
+          align=center,
+          text=gray,
+          outer sep=0pt
+        ] (fn_data) {Blocks \dots};
+
+        \begin{scope}[on background layer]
+          \node[frameBox, fit=(fn_hdr)(fn_data)] (frameN) {};
+        \end{scope}
+      \end{tikzpicture}%
+      }
+    \end{column}
+  \end{columns}
+\end{frame}

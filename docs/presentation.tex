@@ -1,0 +1,39 @@
+\documentclass{beamer}
+\usetheme{Madrid}
+
+\usepackage{fontspec}
+\usepackage{mathtools}
+\usepackage[warnings-off={mathtools-colon,mathtools-overbracket}]{unicode-math}
+\usepackage{amsmath}
+\usepackage{siunitx}
+\sisetup{locale = DE}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning, fit, backgrounds, decorations.pathreplacing, arrows.meta}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage[style=authoryear, backend=biber]{biblatex}
+\addbibresource{bibliography.bib}
+
+\graphicspath{{./assets/}}
+
+\title{Algoritmul de Decompresie Zstandard}
+\author{Rizescu Iulian Ștefan}
+\date{Februarie 2026}
+\institute{Prelucrarea Semnalelor}
+
+\begin{document}
+  \begin{frame}
+    \titlepage
+  \end{frame}
+
+  \input{presentation/01-model-entropy.tex}
+  \input{presentation/02-zstd-model.tex}
+  \input{presentation/03-structural-repetition.tex}
+  \input{presentation/04-literals-section.tex}
+  \input{presentation/05-fse.tex}
+  \input{presentation/06-sequences-section.tex}
+  \input{presentation/07-sequences-execution.tex}
+  \input{presentation/08-periodic-signals.tex}
+  \input{presentation/09-experiments.tex}
+\end{document}

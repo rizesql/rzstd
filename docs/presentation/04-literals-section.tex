@@ -1,0 +1,75 @@
+\begin{frame}{Literals Section}
+  \begin{itemize}
+    \item \textit{Literalii} reprezintă simboluri emise explicit, neacoperite de un \textit{match}
+      prin mecanismul de look-back.
+
+    \item Sunt codificați prin \textbf{Huffman coding}.
+
+    \item Pentru eficiență, secțiunea poate fi imparțită în până la \textbf{4 fluxuri
+      independente}, decodificate separat, dar utilizând același tabel de ponderi.
+
+    \item Tabelul de ponderi poate fi, la rândul său, codificat prin FSE.
+  \end{itemize}
+
+  \begin{center}
+    \resizebox{0.8\linewidth}{!}{%
+    \begin{tikzpicture}[
+      font=\sffamily,
+      thick,
+      >=stealth,
+      node distance=0pt,
+      % Node styles
+      slice/.style={draw=blue!80, fill=blue!10, minimum height=0.8cm, minimum width=2.6cm, align=center},
+      decoder/.style={draw=purple!70!black, fill=purple!10, minimum height=0.8cm, minimum width=2.6cm, align=center},
+      segment/.style={draw=green!70!black, fill=green!10, minimum height=0.8cm, minimum width=2.6cm, align=center}
+    ]
+      \node[slice] (s1) at (0, 1.5) {Bitstream Slice 1};
+      \node[slice] (s2) at (0, 0.5) {Bitstream Slice 2};
+      \node[slice] (s3) at (0, -0.5) {Bitstream Slice 3};
+      \node[slice] (s4) at (0, -1.5) {Bitstream Slice 4};
+
+      \node[draw=blue!80, inner sep=6pt, rounded corners=2pt, fit=(s1)(s2)(s3)(s4)]
+        (lit_group)
+        {};
+      \node[above=0.1cm of lit_group.north, font=\sffamily\small, text=blue!80!black]
+        {\textbf{Literals Section}};
+
+      \node[decoder] (d1) at (5.5, 1.5) {Huff0 Dec 1};
+      \node[decoder] (d2) at (5.5, 0.5) {Huff0 Dec 2};
+      \node[decoder] (d3) at (5.5, -0.5) {Huff0 Dec 3};
+      \node[decoder] (d4) at (5.5, -1.5) {Huff0 Dec 4};
+
+      \node[
+        draw=purple!80,
+        dashed,
+        inner sep=6pt,
+        rounded corners=2pt,
+        fit=(d1)(d2)(d3)(d4)
+      ] (dec_group) {};
+      \node[above=0.1cm of dec_group.north, font=\sffamily\small, text=purple!70!black]
+        {\textbf{Shared Weights Table}};
+
+      \node[segment] (o1) at (11, 1.5) {Segment 1};
+      \node[segment] (o2) at (11, 0.5) {Segment 2};
+      \node[segment] (o3) at (11, -0.5) {Segment 3};
+      \node[segment] (o4) at (11, -1.5) {Segment 4};
+
+      \node[draw=green!70!black, inner sep=6pt, rounded corners=2pt, fit=(o1)(o2)(o3)(o4)]
+        (out_group)
+        {};
+      \node[above=0.1cm of out_group.north, font=\sffamily\small, text=green!70!black]
+        {\textbf{Literals Buffer}};
+
+      \draw[->] (s1.east) -- (d1.west);
+      \draw[->] (s2.east) -- (d2.west);
+      \draw[->] (s3.east) -- (d3.west);
+      \draw[->] (s4.east) -- (d4.west);
+
+      \draw[->] (d1.east) -- (o1.west);
+      \draw[->] (d2.east) -- (o2.west);
+      \draw[->] (d3.east) -- (o3.west);
+      \draw[->] (d4.east) -- (o4.west);
+    \end{tikzpicture}%
+    }
+  \end{center}
+\end{frame}
